@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -26,6 +26,22 @@
 #include "internal.h"
 #include "asoc/bolero-slave-internal.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+#include "feedback/oplus_audio_kernel_fb.h"
+#ifdef dev_err
+#undef dev_err
+#define dev_err dev_err_fb_delay
+#endif
+#ifdef dev_err_ratelimited
+#undef dev_err_ratelimited
+#define dev_err_ratelimited dev_err_ratelimited_fb_delay
+#endif
+#ifdef pr_err
+#undef pr_err
+#define pr_err pr_err_fb_delay
+#endif
+#endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
+
 #define NUM_SWRS_DT_PARAMS 5
 
 #define WCD9378_MOBILE_MODE 0x01
@@ -38,7 +54,10 @@
 #define SWR_BASECLK_22P5792MHZ   (0x04)
 
 #define SWR_CLKSCALE_DIV2        (0x02)
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 #define SWR_CLKSCALE_DIV4        (0x03)
+#endif /* OPLUS_ARCH_EXTENDS */
 
 #define ADC_MODE_VAL_HIFI     0x01
 #define ADC_MODE_VAL_NORMAL   0x03
@@ -50,6 +69,7 @@
 #define PWR_LEVEL_ULP_VAL     0x03
 
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 #define WCD9378_MBQ_ENABLE_MASK   0x2000
 #endif /* OPLUS_ARCH_EXTENDS */
 
@@ -306,12 +326,24 @@ static int wcd9378_swr_slvdev_datapath_control(struct device *dev,
 
 	if (path == RX_PATH) {
 		swr_dev = wcd9378->rx_swr_dev;
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
+		swr_clk = wcd9378->swr_base_clk;
+		clk_scale = wcd9378->swr_clk_scale;
+#else /* OPLUS_ARCH_EXTENDS */
 		swr_clk = wcd9378->rx_swrclk;
 		clk_scale = wcd9378->rx_clkscale;
+#endif /* OPLUS_ARCH_EXTENDS */
 	} else {
 		swr_dev = wcd9378->tx_swr_dev;
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
+		swr_clk = SWR_BASECLK_19P2MHZ;
+		clk_scale = SWR_CLKSCALE_DIV2;
+#else /* OPLUS_ARCH_EXTENDS */
 		swr_clk = wcd9378->tx_swrclk;
 		clk_scale = wcd9378->tx_clkscale;
+#endif /* OPLUS_ARCH_EXTENDS */
 	}
 
 	bank = (wcd9378_swr_slv_get_current_bank(swr_dev,
@@ -433,10 +465,6 @@ static int wcd9378_init_reg(struct snd_soc_component *component)
 	/*HPH_DN_T0: 0.007*/
 	snd_soc_component_update_bits(component, WCD9378_HPH_DN_T0,
 			WCD9378_HPH_DN_T0_HPH_DN_T0_MASK, 0x06);
-
-	/*SHORT_PROT_EN ENABLE*/
-	snd_soc_component_update_bits(component, WCD9378_ANA_EAR,
-			WCD9378_ANA_EAR_SHORT_PROT_EN_MASK, 0x40);
 
 	/*SM0 MB SEL:MB1*/
 	snd_soc_component_update_bits(component, WCD9378_SM0_MB_SEL,
@@ -625,7 +653,6 @@ static int wcd9378_parse_port_mapping(struct device *dev,
 
 	for (i = 0; i < map_length; i++) {
 		port_num = dt_array[NUM_SWRS_DT_PARAMS * i];
-
 		if (port_num >= MAX_PORT || ch_iter >= MAX_CH_PER_PORT) {
 			dev_err(dev, "%s: Invalid port or channel number\n", __func__);
 			goto err_pdata_fail;
@@ -970,8 +997,13 @@ int wcd9378_mbhc_micb_adjust_voltage(struct snd_soc_component *component,
 			micb_usage, micb_mask, req_vout_ctl);
 
 	if (micb_num == MIC_BIAS_2) {
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+		dev_err_not_fb(component->dev,
+			"%s: sj micbias set\n", __func__);
+#else
 		dev_err(component->dev,
 			"%s: sj micbias set\n", __func__);
+#endif
 		snd_soc_component_update_bits(component,
 				WCD9378_IT31_MICB,
 				WCD9378_IT31_MICB_IT31_MICB_MASK,
@@ -1000,6 +1032,8 @@ void wcd9378_disable_bcs_before_slow_insert(struct snd_soc_component *component,
 	}
 }
 
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 static void wcd9378_get_swr_clk_val(
 			struct snd_soc_component *component,
 			int rate)
@@ -1025,6 +1059,7 @@ static void wcd9378_get_swr_clk_val(
 	dev_dbg(component->dev, "%s: rate: %d, tx_swrclk: 0x%x, tx_clkscale: 0x%x\n",
 		__func__, rate, wcd9378->tx_swrclk, wcd9378->tx_clkscale);
 }
+#endif /* OPLUS_ARCH_EXTENDS */
 
 static int wcd9378_get_clk_rate(int mode)
 {
@@ -1259,9 +1294,10 @@ static int wcd9378_tx_sequencer_enable(struct snd_soc_dapm_widget *w,
 		set_bit(w->shift - ADC1, &wcd9378->status_mask);
 		wcd9378_tx_connect_port(component, w->shift, rate,
 				true);
-
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 		wcd9378_get_swr_clk_val(component, rate);
-
+#endif /* OPLUS_ARCH_EXTENDS */
 		switch (w->shift) {
 		case ADC1:
 			/*SMP MIC0 IT11 USAGE SET*/
@@ -1386,8 +1422,11 @@ static int wcd9378_tx_sequencer_enable(struct snd_soc_dapm_widget *w,
 
 		switch (w->shift) {
 		case ADC1:
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 			snd_soc_component_update_bits(component, WCD9378_IT11_USAGE,
 						WCD9378_IT11_USAGE_IT11_USAGE_MASK, 0x00);
+#endif /* OPLUS_ARCH_EXTENDS */
 			/*Normal TXFE Startup*/
 			snd_soc_component_update_bits(component, WCD9378_ANA_TX_CH2,
 					WCD9378_ANA_TX_CH2_HPF1_INIT_MASK, 0x00);
@@ -1398,6 +1437,13 @@ static int wcd9378_tx_sequencer_enable(struct snd_soc_dapm_widget *w,
 
 			break;
 		case ADC2:
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk  */
+			if (test_bit(TX1_AMIC2_EN, &wcd9378->sys_usage_status))
+				/*tear down TX1 sequencer*/
+				snd_soc_component_update_bits(component, WCD9378_PDE34_REQ_PS,
+						WCD9378_PDE34_REQ_PS_PDE34_REQ_PS_MASK, 0x03);
+#else /* OPLUS_ARCH_EXTENDS */
 			if (test_bit(TX1_AMIC2_EN, &wcd9378->sys_usage_status)) {
 				snd_soc_component_update_bits(component,
 						WCD9378_IT31_USAGE,
@@ -1407,13 +1453,17 @@ static int wcd9378_tx_sequencer_enable(struct snd_soc_dapm_widget *w,
 				snd_soc_component_update_bits(component, WCD9378_PDE34_REQ_PS,
 						WCD9378_PDE34_REQ_PS_PDE34_REQ_PS_MASK, 0x03);
 			}
+#endif /* OPLUS_ARCH_EXTENDS */
+
 
 			if (test_bit(TX1_AMIC3_EN, &wcd9378->sys_usage_status)) {
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 				snd_soc_component_update_bits(component,
 						WCD9378_SMP_MIC_CTRL1_IT11_USAGE,
 						WCD9378_SMP_MIC_CTRL1_IT11_USAGE_IT11_USAGE_MASK,
 						0x00);
-
+#endif /* OPLUS_ARCH_EXTENDS */
 				/*Normal TXFE Startup*/
 				snd_soc_component_update_bits(component, WCD9378_ANA_TX_CH2,
 						WCD9378_ANA_TX_CH2_HPF1_INIT_MASK, 0x00);
@@ -1426,11 +1476,13 @@ static int wcd9378_tx_sequencer_enable(struct snd_soc_dapm_widget *w,
 			}
 			break;
 		case ADC3:
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 			snd_soc_component_update_bits(component,
 						WCD9378_SMP_MIC_CTRL2_IT11_USAGE,
 						WCD9378_SMP_MIC_CTRL2_IT11_USAGE_IT11_USAGE_MASK,
 						0x00);
-
+#endif /* OPLUS_ARCH_EXTENDS */
 			/*Normal TXFE Startup*/
 			snd_soc_component_update_bits(component, WCD9378_ANA_TX_CH3_HPF,
 					WCD9378_ANA_TX_CH3_HPF_HPF3_INIT_MASK, 0x00);
@@ -1626,8 +1678,18 @@ static int wcd9378_codec_hphl_dac_event(struct snd_soc_dapm_widget *w,
 			WCD9378_CDC_HPH_GAIN_CTL_HPHL_RX_EN_MASK, 0x00);
 		wcd9378_rx_connect_port(component, HPH_L, false);
 
-		if (wcd9378->comp1_enable)
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3901539 keep comp on when headphones power off */
+		if (wcd9378->comp1_enable) {
+			snd_soc_component_update_bits(component, WCD9378_CDC_COMP_CTL_0,
+				WCD9378_CDC_COMP_CTL_0_HPHL_COMP_EN_MASK, 0x00);
 			wcd9378_rx_connect_port(component, COMP_L, false);
+		}
+#else /* OPLUS_ARCH_EXTENDS */
+		if (wcd9378->comp1_enable) {
+			wcd9378_rx_connect_port(component, COMP_L, false);
+		}
+#endif /* OPLUS_ARCH_EXTENDS */
 		break;
 	default:
 		break;
@@ -1682,9 +1744,18 @@ static int wcd9378_codec_hphr_dac_event(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(component, WCD9378_CDC_HPH_GAIN_CTL,
 			WCD9378_CDC_HPH_GAIN_CTL_HPHR_RX_EN_MASK, 0x00);
 		wcd9378_rx_connect_port(component, HPH_R, false);
-
-		if (wcd9378->comp2_enable)
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3901539 keep comp on when headphones power off */
+		if (wcd9378->comp2_enable) {
+			snd_soc_component_update_bits(component, WCD9378_CDC_COMP_CTL_0,
+				WCD9378_CDC_COMP_CTL_0_HPHR_COMP_EN_MASK, 0x00);
 			wcd9378_rx_connect_port(component, COMP_R, false);
+		}
+#else /* OPLUS_ARCH_EXTENDS */
+		if (wcd9378->comp2_enable) {
+			wcd9378_rx_connect_port(component, COMP_R, false);
+		}
+#endif /* OPLUS_ARCH_EXTENDS */
 		break;
 	default:
 		break;
@@ -1967,12 +2038,14 @@ static void wcd9378_hph_set_channel_volume(struct snd_soc_component *component)
 	struct wcd9378_priv *wcd9378 =
 				snd_soc_component_get_drvdata(component);
 #ifdef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 	u8 msb_val = 0, lsb_val = 0;
 #endif /* OPLUS_ARCH_EXTENDS */
 
 	if ((!wcd9378->comp1_enable) &&
 			(!wcd9378->comp2_enable)) {
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 		snd_soc_component_update_bits(component,
 				(WCD9378_FU42_CH_VOL_CH1 | WCD9378_MBQ_ENABLE_MASK),
 				WCD9378_FU42_CH_VOL_CH1_FU42_CH_VOL_CH1_MASK,
@@ -2013,6 +2086,7 @@ static int wcd9378_hph_sequencer_enable(struct snd_soc_dapm_widget *w,
 	int power_level, ret = 0;
 	struct swr_device *swr_dev = wcd9378->tx_swr_dev;
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 	u8 scp_commit_val = 0x2;
 #else /* OPLUS_ARCH_EXTENDS */
 	u8 commit_val = 0x02;
@@ -2026,6 +2100,7 @@ static int wcd9378_hph_sequencer_enable(struct snd_soc_dapm_widget *w,
 		wcd9378_sys_usage_auto_udpate(component, RX0_RX1_HPH_EN, true);
 
 #ifdef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 		regmap_write(wcd9378->regmap, WCD9378_CMT_GRP_MASK, 0x02);
 #endif /* OPLUS_ARCH_EXTENDS */
 
@@ -2065,6 +2140,7 @@ static int wcd9378_hph_sequencer_enable(struct snd_soc_dapm_widget *w,
 			usleep_range(9500, 9510);
 
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 		/*RX0 unmute*/
 		snd_soc_component_update_bits(component, WCD9378_FU42_MUTE_CH1,
 				WCD9378_FU42_MUTE_CH1_FU42_MUTE_CH1_MASK, 0x00);
@@ -2083,6 +2159,7 @@ static int wcd9378_hph_sequencer_enable(struct snd_soc_dapm_widget *w,
 					WCD9378_FU23_MUTE_FU23_MUTE_MASK, 0x00);
 
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 		swr_write(swr_dev, swr_dev->dev_num, 0x004c, &scp_commit_val);
 #else /* OPLUS_ARCH_EXTENDS */
 		swr_write(swr_dev, swr_dev->dev_num, 0x004c, &commit_val);
@@ -2092,6 +2169,7 @@ static int wcd9378_hph_sequencer_enable(struct snd_soc_dapm_widget *w,
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 #ifndef OPLUS_ARCH_EXTENDS
+/* 2024/8/28, add for fix wcd9378_hph channel Exception */
 		/*RX0 mute*/
 		snd_soc_component_update_bits(component, WCD9378_FU42_MUTE_CH1,
 				WCD9378_FU42_MUTE_CH1_FU42_MUTE_CH1_MASK, 0x01);
@@ -2141,6 +2219,9 @@ static int wcd9378_codec_ear_dac_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		/*SHORT_PROT_EN ENABLE*/
+		snd_soc_component_update_bits(component, WCD9378_ANA_EAR,
+				WCD9378_ANA_EAR_SHORT_PROT_EN_MASK, 0x40);
 		if (!ear_rx2) {
 			/*RX0 ENABLE*/
 			snd_soc_component_update_bits(component, WCD9378_CDC_HPH_GAIN_CTL,
@@ -2170,6 +2251,9 @@ static int wcd9378_codec_ear_dac_event(struct snd_soc_dapm_widget *w,
 		}
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		/*SHORT_PROT_EN DISABLE*/
+		snd_soc_component_update_bits(component, WCD9378_ANA_EAR,
+				WCD9378_ANA_EAR_SHORT_PROT_EN_MASK, 0x00);
 		if (test_bit(RX0_EAR_EN, &wcd9378->sys_usage_status)) {
 			/*RX0 DISABLE*/
 			snd_soc_component_update_bits(component, WCD9378_CDC_HPH_GAIN_CTL,
@@ -2255,6 +2339,7 @@ static int wcd9378_sa_sequencer_enable(struct snd_soc_dapm_widget *w,
 	struct snd_soc_component *component =
 					snd_soc_dapm_to_component(w->dapm);
 #ifdef OPLUS_ARCH_EXTENDS
+/* 2024/9/10, fixed after double ring speaker mute */
 	struct wcd9378_priv *wcd9378 =
 				snd_soc_component_get_drvdata(component);
 #endif /* OPLUS_ARCH_EXTENDS */
@@ -2274,6 +2359,7 @@ static int wcd9378_sa_sequencer_enable(struct snd_soc_dapm_widget *w,
 				WCD9378_FU23_MUTE_FU23_MUTE_MASK, 0x00);
 
 #ifdef OPLUS_ARCH_EXTENDS
+/* 2024/9/10, fixed after double ring speaker mute */
 		if (wcd9378->sys_usage == SYS_USAGE_10) {
 			regmap_write(wcd9378->regmap, WCD9378_FU42_MUTE_CH1, 0x00);
 			regmap_write(wcd9378->regmap, WCD9378_FU42_MUTE_CH2, 0x00);
@@ -2394,7 +2480,9 @@ int wcd9378_micbias_control(struct snd_soc_component *component,
 					micb_usage, micb_mask, micb_usage_val);
 
 			if (micb_num == MIC_BIAS_2) {
-				snd_soc_component_update_bits(component,
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3904930 for optimize the logic of enabling micbias2 */
+ 				snd_soc_component_update_bits(component,
 						WCD9378_ANA_MICB2_RAMP,
 						WCD9378_ANA_MICB2_RAMP_SHIFT_CTL_MASK,
 						0x0C);
@@ -2402,6 +2490,7 @@ int wcd9378_micbias_control(struct snd_soc_component *component,
 						WCD9378_ANA_MICB2_RAMP,
 						WCD9378_ANA_MICB2_RAMP_RAMP_ENABLE_MASK,
 						0x00);
+#endif /* OPLUS_ARCH_EXTENDS */
 				snd_soc_component_update_bits(component,
 						WCD9378_IT31_MICB,
 						WCD9378_IT31_MICB_IT31_MICB_MASK,
@@ -2443,6 +2532,8 @@ int wcd9378_micbias_control(struct snd_soc_component *component,
 						WCD9378_IT31_MICB,
 						WCD9378_IT31_MICB_IT31_MICB_MASK,
 						0x00);
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3904930 for optimize the logic of enabling micbias2 */
 				snd_soc_component_update_bits(component,
 						WCD9378_ANA_MICB2_RAMP,
 						WCD9378_ANA_MICB2_RAMP_SHIFT_CTL_MASK,
@@ -2451,6 +2542,7 @@ int wcd9378_micbias_control(struct snd_soc_component *component,
 						WCD9378_ANA_MICB2_RAMP,
 						WCD9378_ANA_MICB2_RAMP_RAMP_ENABLE_MASK,
 						0x80);
+#endif /* OPLUS_ARCH_EXTENDS */
 				wcd9378->curr_micbias2 = 0;
 			}
 			if (post_off_event && wcd9378->mbhc)
@@ -2582,6 +2674,11 @@ static int wcd9378_event_notify(struct notifier_block *block,
 						NULL);
 		wcd9378->mbhc->wcd_mbhc.deinit_in_progress = true;
 		mbhc = &wcd9378->mbhc->wcd_mbhc;
+		#ifdef OPLUS_ARCH_EXTENDS
+		/* Add for fix headset not correct after ssr */
+		mbhc->plug_before_ssr = mbhc->current_plug;
+		pr_info("%s: mbhc->plug_before_ssr=%d\n", __func__, mbhc->plug_before_ssr);
+		#endif /* OPLUS_ARCH_EXTENDS */
 		wcd9378->usbc_hs_status = get_usbc_hs_status(component,
 						mbhc->mbhc_cfg);
 		wcd9378_mbhc_ssr_down(wcd9378->mbhc, component);
@@ -2628,21 +2725,40 @@ static int wcd9378_event_notify(struct notifier_block *block,
 		rx_clk_type = (val >> 0x10);
 
 		switch (rx_clk_type) {
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3887587 change the tx clk scale for different swr clk */
 		case RX_CLK_12P288MHZ:
-			wcd9378->rx_swrclk = SWR_BASECLK_24P576MHZ;
-			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+			wcd9378->swr_base_clk = SWR_BASECLK_24P576MHZ;
+			wcd9378->swr_clk_scale = SWR_CLKSCALE_DIV2;
 			break;
 		case RX_CLK_11P2896MHZ:
-			wcd9378->rx_swrclk = SWR_BASECLK_22P5792MHZ;
-			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+			wcd9378->swr_base_clk = SWR_BASECLK_22P5792MHZ;
+			wcd9378->swr_clk_scale = SWR_CLKSCALE_DIV2;
 			break;
 		default:
-			wcd9378->rx_swrclk = SWR_BASECLK_19P2MHZ;
-			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+			wcd9378->swr_base_clk = SWR_BASECLK_19P2MHZ;
+			wcd9378->swr_clk_scale = SWR_CLKSCALE_DIV2;
 			break;
 		}
 		dev_dbg(component->dev, "%s: base_clk:0x%0x, clk_scale:0x%x\n",
+				__func__, wcd9378->swr_base_clk, wcd9378->swr_clk_scale);
+#else /* OPLUS_ARCH_EXTENDS */
+ 		case RX_CLK_12P288MHZ:
+			wcd9378->rx_swrclk = SWR_BASECLK_24P576MHZ;
+			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+ 			break;
+ 		case RX_CLK_11P2896MHZ:
+			wcd9378->rx_swrclk = SWR_BASECLK_22P5792MHZ;
+			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+ 			break;
+ 		default:
+			wcd9378->rx_swrclk = SWR_BASECLK_19P2MHZ;
+			wcd9378->rx_clkscale = SWR_CLKSCALE_DIV2;
+ 			break;
+ 		}
+ 		dev_dbg(component->dev, "%s: base_clk:0x%0x, clk_scale:0x%x\n",
 				__func__, wcd9378->rx_swrclk, wcd9378->rx_clkscale);
+#endif /* OPLUS_ARCH_EXTENDS */
 
 		break;
 	default:
@@ -2920,7 +3036,7 @@ static int wcd9378_hph_get_gain(struct snd_kcontrol *kcontrol,
 	offset /= 0x180;
 	ucontrol->value.enumerated.item[0] = offset;
 
-	dev_dbg(component->dev, "%s： offset is 0x%0x\n", __func__, offset);
+	dev_dbg(component->dev, "%s : offset is 0x%0x\n", __func__, offset);
 	return 0;
 }
 
@@ -2938,7 +3054,12 @@ static int wcd9378_ear_pa_gain_get(struct snd_kcontrol *kcontrol,
 		snd_soc_component_read(component, WCD9378_ANA_EAR_COMPANDER_CTL) &
 				WCD9378_ANA_EAR_COMPANDER_CTL_EAR_GAIN_MASK;
 
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3910321 shift the ear gain value when set the ear gain */
+	ucontrol->value.enumerated.item[0] = ear_gain;
+#else /* OPLUS_ARCH_EXTENDS */
 	ucontrol->value.enumerated.item[0] = ear_gain >> 2;
+#endif /* OPLUS_ARCH_EXTENDS */
 	dev_dbg(component->dev, "%s: get ear_gain val: 0x%x\n",
 			__func__, ear_gain);
 	return 0;
@@ -2962,7 +3083,10 @@ static int wcd9378_ear_pa_gain_put(struct snd_kcontrol *kcontrol,
 	}
 
 	ear_gain = ucontrol->value.integer.value[0];
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add CR-3910321 shift the ear gain value when set the ear gain */
 	ear_gain = ear_gain << 2;
+#endif /* OPLUS_ARCH_EXTENDS */
 	snd_soc_component_update_bits(component, WCD9378_ANA_EAR_COMPANDER_CTL,
 				WCD9378_ANA_EAR_COMPANDER_CTL_EAR_GAIN_MASK,
 				ear_gain);
@@ -3481,7 +3605,7 @@ static int wcd93xx_die_crk_det_en_put(struct snd_kcontrol *kcontrol,
 		ctl_value = det_en[ucontrol->value.enumerated.item[0]];
 		ret = snd_soc_component_update_bits(component,
 			WCD9378_DIE_CRACK_DIE_CRK_DET_EN, 0xFF, ctl_value);
-		dev_err(component->dev, "%s: det en update value %4x, return %d \n", __func__,ctl_value, ret);
+		dev_dbg(component->dev, "%s: det en update value %4x, return %d \n", __func__,ctl_value, ret);
 
 	} else {
 		dev_err(component->dev,
@@ -3514,7 +3638,7 @@ static int wcd93xx_die_crk_det_en_get(struct snd_kcontrol *kcontrol,
 	}
 
 	regmap_read(wcd9378->regmap, WCD9378_DIE_CRACK_DIE_CRK_DET_EN, &reg);
-	dev_err(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_DIE_CRK_DET_EN, reg);
+	dev_dbg(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_DIE_CRK_DET_EN, reg);
 
 	ucontrol->value.enumerated.item[0] = get_enum_index_from_reg(det_en, ARRAY_SIZE(det_en), reg);
 
@@ -3539,7 +3663,7 @@ static int wcd93xx_die_crk_det_int1_put(struct snd_kcontrol *kcontrol,
 		ctl_value = det_int1[ucontrol->value.enumerated.item[0]];
 		ret = snd_soc_component_update_bits(component,
 			WCD9378_DIE_CRACK_INT_DIE_CRK_DET_INT1, 0xFF, ctl_value);
-		dev_err(component->dev, "%s: det int1 update value %4x, return %d \n", __func__,ctl_value, ret);
+		dev_dbg(component->dev, "%s: det int1 update value %4x, return %d \n", __func__,ctl_value, ret);
 	} else {
 		dev_err(component->dev,
 			"%s: out of index ,please check your input value \n", __func__);
@@ -3571,7 +3695,7 @@ static int wcd93xx_die_crk_det_int1_get(struct snd_kcontrol *kcontrol,
 	}
 
 	regmap_read(wcd9378->regmap, WCD9378_DIE_CRACK_INT_DIE_CRK_DET_INT1, &reg);
-	dev_err(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_INT_DIE_CRK_DET_INT1, reg);
+	dev_dbg(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_INT_DIE_CRK_DET_INT1, reg);
 
 	ucontrol->value.enumerated.item[0] = get_enum_index_from_reg(det_int1, ARRAY_SIZE(det_int1), reg);
 
@@ -3600,7 +3724,7 @@ static int wcd93xx_die_crk_det_out_get(struct snd_kcontrol *kcontrol,
 	}
 
 	regmap_read(wcd9378->regmap, WCD9378_DIE_CRACK_DIE_CRK_DET_OUT, &reg);
-	dev_err(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_DIE_CRK_DET_OUT, reg);
+	dev_dbg(component->dev, "%04x:%04x\n", WCD9378_DIE_CRACK_DIE_CRK_DET_OUT, reg);
 
 	ucontrol->value.enumerated.item[0] = reg;
 
@@ -4061,7 +4185,10 @@ static const struct snd_soc_dapm_route wcd9378_audio_map[] = {
 	{"AUX_RDAC", NULL, "DAC2"},
 	{"SA SEQUENCER", NULL, "AUX_RDAC"},
 	{"AUX_MIXER", "Switch", "SA SEQUENCER",},
+	#ifndef CONFIG_SND_SOC_OPLUS_PA_MANAGER
+	/* 2024/11/28, modify for wcd9378 use damp avoid noise issues */
 	{"AUX PGA", NULL, "AUX_MIXER"},
+	#endif /* CONFIG_SND_SOC_OPLUS_PA_MANAGER */
 	{"AUX", NULL, "AUX PGA"},
 };
 
@@ -4417,7 +4544,12 @@ static int wcd9378_reset(struct device *dev)
 		return -EPROBE_DEFER;
 	}
 	/* 20us sleep required after pulling the reset gpio to LOW */
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3860025 increase delay for gpio reset */
+	usleep_range(20, 30);
+#else /* OPLUS_ARCH_EXTENDS */
 	usleep_range(80, 85);
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	rc = msm_cdc_pinctrl_select_active_state(wcd9378->rst_np);
 	if (rc) {
@@ -4426,7 +4558,12 @@ static int wcd9378_reset(struct device *dev)
 		return -EPROBE_DEFER;
 	}
 	/* 20us sleep required after pulling the reset gpio to HIGH */
+#ifndef OPLUS_ARCH_EXTENDS
+/* Add CR-3860025 increase delay for gpio reset */
+	usleep_range(20, 30);
+#else /* OPLUS_ARCH_EXTENDS */
 	usleep_range(80, 85);
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	return rc;
 }
@@ -4652,8 +4789,13 @@ static int wcd9378_bind(struct device *dev)
 		goto err;
 	}
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+	dev_err_not_fb(wcd9378->dev, "%s: wcd irq init done\n",
+			__func__);
+#else
 	dev_err(wcd9378->dev, "%s: wcd irq init done\n",
 			__func__);
+#endif
 	wcd9378->tx_swr_dev->slave_irq = wcd9378->virq;
 
 	/* Request for watchdog interrupt */

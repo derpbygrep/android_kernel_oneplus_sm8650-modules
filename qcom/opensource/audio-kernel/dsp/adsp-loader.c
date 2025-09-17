@@ -206,6 +206,10 @@ static ssize_t adsp_ssr_store(struct kobject *kobj,
 	struct platform_device *pdev = adsp_private;
 	struct adsp_loader_private *priv = NULL;
 
+	if (!pdev) {
+		pr_err("%s: Platform device null\n", __func__);
+		return -EINVAL;
+	}
 	dev_dbg(&pdev->dev, "%s: going to call adsp ssr\n ", __func__);
 
 	priv = platform_get_drvdata(pdev);
