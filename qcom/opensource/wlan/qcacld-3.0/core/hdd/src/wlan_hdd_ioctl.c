@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -164,6 +164,15 @@ struct hdd_drv_cmd {
 #define WLAN_WAIT_TIME_READY_TO_EXTWOW   2000
 #define WLAN_HDD_MAX_TCP_PORT            65535
 #endif
+
+extern bool check_private_miracast_cmd(uint8_t *sub_command, int *sta_quota);
+extern int handle_private_miracast_cmd(struct wlan_hdd_link_info *link_info,  int sta_quota);
+extern int drv_cmd_smartmcc_get_fw_update_quota(struct wlan_hdd_link_info *link_info,
+			    struct hdd_context *hdd_ctx,
+			    uint8_t *command,
+			    uint8_t command_len,
+			    struct hdd_priv_data *priv_data);
+// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
 
 /**
  * drv_cmd_validate() - Validates for space in hdd driver command
@@ -3254,26 +3263,11 @@ static int drv_cmd_set_suspend_mode(struct wlan_hdd_link_info *link_info,
 		return -EINVAL;
 	}
 
-	hdd_debug("idle_monitor:%d, configure apf per screen state = %d",
-		  idle_monitor,
-		  ucfg_pmo_is_configure_apf_per_screen_state(hdd_ctx->psoc));
-
-	if (sme_get_dhcp_status(hdd_ctx->mac_handle, link_info->vdev_id)) {
-		hdd_nofl_debug("DHCP in progress. Ignore SETSUSPEND command");
-		return 0;
-	}
-
-	if (ucfg_pmo_is_configure_apf_per_screen_state(hdd_ctx->psoc)) {
-		if (idle_monitor == 0)
-			hdd_disable_active_apf_mode(link_info);
-		else if (idle_monitor == 1)
-			hdd_enable_active_apf_mode(link_info);
-	}
-
-	if (sme_get_dhcp_status(hdd_ctx->mac_handle, link_info->vdev_id)) {
-		hdd_nofl_debug("DHCP in progress. Ignore SETSUSPEND command");
-		return 0;
-	}
+	hdd_debug("idle_monitor:%d", idle_monitor);
+	if (idle_monitor == 0)
+		hdd_disable_active_apf_mode(link_info);
+	else if (idle_monitor == 1)
+		hdd_enable_active_apf_mode(link_info);
 
 	status = ucfg_pmo_tgt_psoc_send_idle_roam_suspend_mode(hdd_ctx->psoc,
 							       idle_monitor);
@@ -3558,7 +3552,7 @@ void hdd_get_roam_scan_ch_cb(hdd_handle_t hdd_handle,
 	osif_request_put(request);
 }
 
-static int
+static uint32_t
 hdd_get_roam_chan_from_fw(struct hdd_adapter *adapter, uint32_t *chan_list,
 			  uint8_t *num_channels)
 {
@@ -3628,7 +3622,7 @@ hdd_get_roam_scan_freq(struct hdd_adapter *adapter, mac_handle_t mac_handle,
 	if (is_roam_ch_from_fw_supported(adapter->hdd_ctx)) {
 		ret = hdd_get_roam_chan_from_fw(adapter, chan_list,
 						num_channels);
-		if (ret) {
+		if (ret != QDF_STATUS_SUCCESS) {
 			hdd_err("failed to get roam scan channel list from FW");
 			return -EFAULT;
 		}
@@ -4817,10 +4811,18 @@ static int drv_cmd_miracast(struct wlan_hdd_link_info *link_info,
 	uint8_t filter_type = 0;
 	uint8_t *value;
 
+	int sta_quota;
+	// end
+
 	if (wlan_hdd_validate_context(hdd_ctx))
 		return -EINVAL;
 
 	value = command + 9;
+
+	if (check_private_miracast_cmd(value, &sta_quota)) {
+	    return handle_private_miracast_cmd(link_info, sta_quota);
+	}
+	// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
 
 	/* Convert the value from ascii to integer */
 	ret = kstrtou8(value, 10, &filter_type);
@@ -6731,16 +6733,12 @@ static bool check_disable_channels(struct hdd_context *hdd_ctx,
 	    !hdd_ctx->original_channels->channel_info)
 		return false;
 
-	qdf_mutex_acquire(&hdd_ctx->cache_channel_lock);
 	num_channels = hdd_ctx->original_channels->num_channels;
 	for (i = 0; i < num_channels; i++) {
 		if (operating_freq ==
-		    hdd_ctx->original_channels->channel_info[i].freq) {
-			qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+		    hdd_ctx->original_channels->channel_info[i].freq)
 			return true;
-		}
 	}
-	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
 
 	return false;
 }
@@ -7361,6 +7359,88 @@ static int drv_cmd_get_function_call_map(struct wlan_hdd_link_info *link_info,
 	return 0;
 }
 #endif
+//ifdef OPLUS_FEATURE_WIFI_ARCHITECHURE
+static int drv_cmd_set_11be_disabled(struct wlan_hdd_link_info *link_info,
+					 struct hdd_context *hdd_ctx,
+					 uint8_t *command,
+					 uint8_t command_len,
+					 struct hdd_priv_data *priv_data){
+	int errno;
+	uint8_t val = 0;
+	uint8_t *value = command;
+	value = value + 18; //command：SET-11BE-DISABLED 1
+	errno = kstrtou8(value, 10, &val);
+	if (errno < 0) {
+		/*
+		 * If the input value is greater than max value of datatype,
+		 * then also kstrtou8 fails
+		 */
+		hdd_err("kstrtou8 failed invalid input value");
+		return -EINVAL;
+	}
+	hdd_debug("command val %d,errno %d", val, errno);
+	if(val){
+		hdd_ctx->psoc->soc_nif.user_config.usr_disable_eht = true;
+	}
+	return 0;
+}
+//endif
+
+static int drv_cmd_set_burst_time(struct wlan_hdd_link_info *link_info,
+				  struct hdd_context *hdd_ctx,
+				  uint8_t *command,
+				  uint8_t command_len,
+				  struct hdd_priv_data *priv_data)
+{
+	uint8_t *value = command;
+	int  temp = 0;
+	uint32_t val = 0;
+	struct wlan_objmgr_psoc *psoc = hdd_ctx->psoc;
+	struct wlan_scan_obj *scan_obj;
+
+	if (!psoc) {
+		hdd_err("psoc is null");
+		return -EINVAL;
+	}
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	hdd_debug("command is %s", command);
+	if (!scan_obj)
+		return -EINVAL;;
+	if (strncmp(command, "SETBURSTTIME P2P", 16) == 0) {
+		value = value + 17;
+		temp = kstrtou32(value, 10, &val);
+		if (temp || !cfg_in_range(CFG_ACTIVE_MAX_CHANNEL_TIME, val)) {
+			return -EFAULT;
+		}
+		scan_obj->scan_def.p2p_scan_burst_duration = val;
+	} else if (strncmp(command, "SETBURSTTIME GO", 15) == 0) {
+		value = value + 16;
+		temp = kstrtou32(value, 10, &val);
+		hdd_debug("command is %s", command);
+		if (temp || !cfg_in_range(CFG_ACTIVE_MAX_CHANNEL_TIME, val)) {
+			hdd_debug("command err val is %d ", val);
+			return -EFAULT;
+		}
+		scan_obj->scan_def.go_scan_burst_duration = val;
+	} else if (strncmp(command, "SETBURSTTIME STA", 16) == 0) {
+		value = value + 17;
+		temp = kstrtou32(value, 10, &val);
+		if (temp || !cfg_in_range(CFG_ACTIVE_MAX_CHANNEL_TIME, val)) {
+			return -EFAULT;
+		}
+		scan_obj->scan_def.sta_scan_burst_duration = val;
+	} else if (strncmp(command, "SETBURSTTIME SAP", 16) == 0) {
+		value = value + 17;
+		temp = kstrtou32(value, 10, &val);
+		if (temp || !cfg_in_range(CFG_ACTIVE_MAX_CHANNEL_TIME, val)) {
+			return -EFAULT;
+		}
+		scan_obj->scan_def.ap_scan_burst_duration = val;
+	} else {
+		return -EFAULT;
+	}
+	return 0;
+}
 
 /*
  * The following table contains all supported WLAN HDD
@@ -7478,6 +7558,10 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"RXFILTER-STOP",             drv_cmd_dummy, false},
 	{"BTCOEXSCAN-START",          drv_cmd_dummy, false},
 	{"BTCOEXSCAN-STOP",           drv_cmd_dummy, false},
+	{"SET-11BE-DISABLED",   drv_cmd_set_11be_disabled, true},
+	{"GET-FW-UPDATE-MCC-QUOTA",   drv_cmd_smartmcc_get_fw_update_quota, false},
+	{"SETBURSTTIME", drv_cmd_set_burst_time, false},
+	// End
 	{"GET_SOFTAP_LINK_SPEED",     drv_cmd_get_sap_go_linkspeed, true},
 #ifdef CONFIG_BAND_6GHZ
 	{"GET_WIFI6E_CHANNELS",       drv_cmd_get_wifi6e_channels, true},

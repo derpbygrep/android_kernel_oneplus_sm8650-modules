@@ -256,13 +256,11 @@ void hdd_adapter_set_ml_adapter(struct hdd_adapter *adapter);
  * start.
  * @vdev: VDEV on which link switch will happen
  * @non_trans_vdev_id: VDEV not part of link switch.
- * @is_start_notify: Set to %true if notify is due to start else set to %false
  *
  * Return: QDF_STATUS.
  */
 QDF_STATUS hdd_adapter_link_switch_notification(struct wlan_objmgr_vdev *vdev,
-						uint8_t non_trans_vdev_id,
-						bool is_start_notify);
+						uint8_t non_trans_vdev_id);
 
 /**
  * hdd_mlo_t2lm_register_callback() - Register T2LM callback

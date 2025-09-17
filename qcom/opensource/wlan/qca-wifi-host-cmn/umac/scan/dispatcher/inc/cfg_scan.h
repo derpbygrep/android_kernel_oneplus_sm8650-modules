@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1386,7 +1386,7 @@ enum scan_mode_6ghz {
  * scan_mode_6ghz_duty_cycle - 6ghz Scan mode duty cycle
  * @Min: 0
  * @Max: 0xFFFF
- * @Default: 2
+ * @Default: 4
  *
  * Configure the 6Ghz scan mode duty cycle
  * 0 - No full scan needed, all scans are optimized
@@ -1409,7 +1409,7 @@ enum scan_mode_6ghz {
 			"scan_mode_6ghz_duty_cycle", \
 			0, \
 			0xFFFF, \
-			2, \
+			4, \
 			CFG_VALUE_OR_DEFAULT, \
 			"6ghz scan mode duty cycle")
 
@@ -1485,6 +1485,29 @@ enum scan_mode_6ghz {
 			30000, \
 			CFG_VALUE_OR_DEFAULT, \
 			"last scan ageout time")
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+/*
+ * <ini>
+ * gEnableVendorFt - Enable/Disable vendor ft
+ * @Min: 0
+ * @Max: 1
+ * @Default: 0
+ *
+ * This ini is used to enable/disable vendor ft.
+ *
+ * Related: Scan
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_ENABLE_VENDOR_FT CFG_INI_BOOL(\
+		"gEnableVendorFt",\
+		false,\
+		"enable vendor ft")
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
+
 #define CFG_SCAN_ALL \
 	CFG(CFG_DROP_BCN_ON_CHANNEL_MISMATCH) \
 	CFG(CFG_DROP_BCN_ON_INVALID_FREQ) \
@@ -1525,5 +1548,6 @@ enum scan_mode_6ghz {
 	CFG(CFG_SCAN_ALLOW_BSS_WITH_CORRUPTED_IE) \
 	CFG(CFG_SKIP_6GHZ_AND_INDOOR_FREQ_SCAN) \
 	CFG_SCAN_PNO \
-	CFG(CFG_LAST_SCAN_AGEOUT_TIME)
+	CFG(CFG_LAST_SCAN_AGEOUT_TIME) \
+	CFG(CFG_ENABLE_VENDOR_FT)
 #endif /* __CONFIG_SCAN_H */

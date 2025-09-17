@@ -45,7 +45,6 @@
 #define WLAN_FC0_TYPE_DATA        2
 
 /* Definitions for management frame subtypes in Frame Control field */
-#define WLAN_FC0_STYPE_INVALID       -1
 #define WLAN_FC0_STYPE_ASSOC_REQ      0
 #define WLAN_FC0_STYPE_ASSOC_RESP     1
 #define WLAN_FC0_STYPE_REASSOC_REQ    2
@@ -83,7 +82,6 @@
 #define WLAN_FC0_STYPE_QOS_NULL           12
 #define WLAN_FC0_STYPE_QOS_CFPOLL         14
 #define WLAN_FC0_STYPE_QOS_CFACKPOLL      15
-
 
 /* Get Type/Subtype subfields in Frame Control field */
 #define WLAN_FC0_GET_TYPE(fc)    (((fc) & 0x0c) >> 2)
@@ -236,6 +234,11 @@ enum qcn_attribute_id {
 
 #define ADAPTIVE_11R_OUI      0x964000
 #define ADAPTIVE_11R_OUI_TYPE 0x2C
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+#define VENDOR_FT_OUI 0x000fe2c8
+#define VENDOR_FT_OUI_SUBTYPE 0x04
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 
 #define OUI_LENGTH              4
 #define OUI_TYPE_BITS           24
@@ -3994,6 +3997,15 @@ is_qcn_oui(uint8_t *frm)
 	return ((frm[1] > 4) && (LE_READ_4(frm + 2) ==
 		((QCN_OUI_TYPE_CMN << 24) | QCA_OUI)));
 }
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+static inline bool
+is_vendor_ft_oui(uint8_t *frm)
+{
+	return (frm[1] > 4) && (BE_READ_4(frm + 2) == VENDOR_FT_OUI) &&
+		(*(frm + 6) == VENDOR_FT_OUI_SUBTYPE);
+}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 
 #define WLAN_VENDOR_WME_IE_LEN 24
 /**

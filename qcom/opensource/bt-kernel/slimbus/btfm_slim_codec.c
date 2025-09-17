@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -24,6 +24,10 @@
 
 static int bt_soc_enable_status;
 int btfm_feedback_ch_setting;
+//#ifdef OPLUS_ARCH_EXTENDS
+int oplus_bt_timeout_status = 0;
+int oplus_bt_init_err = 0;
+//#endif /* OPLUS_ARCH_EXTENDS */
 
 static int btfm_slim_codec_write(struct snd_soc_component *codec,
 			unsigned int reg, unsigned int value)
@@ -70,10 +74,40 @@ static int btfm_put_feedback_ch_setting(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+//#ifdef OPLUS_ARCH_EXTENDS
+static int oplus_bt_get_timout_status(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	BTFMSLIM_INFO("oplus_bt_init_err = %d, oplus_bt_timeout_status = %d",
+		oplus_bt_init_err, oplus_bt_timeout_status);
+
+	if (oplus_bt_init_err < oplus_bt_timeout_status) {
+		ucontrol->value.integer.value[0] = oplus_bt_timeout_status;
+	} else {
+		ucontrol->value.integer.value[0] = oplus_bt_init_err;
+	}
+	return 1;
+}
+
+static int oplus_bt_put_timout_status(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	BTFMSLIM_INFO("%d", ucontrol->value.integer.value[0]);
+	oplus_bt_timeout_status = ucontrol->value.integer.value[0];
+	oplus_bt_init_err = ucontrol->value.integer.value[0];
+	return 1;
+}
+//#endif /* OPLUS_ARCH_EXTENDS */
+
 static const struct snd_kcontrol_new status_controls[] = {
 	SOC_SINGLE_EXT("BT SOC status", 0, 0, 1, 0,
 			btfm_soc_status_get,
 			btfm_soc_status_put),
+//#ifdef OPLUS_ARCH_EXTENDS
+	SOC_SINGLE_EXT("BT timeout status", 0, 0, 1000, 0,
+			oplus_bt_get_timout_status,
+			oplus_bt_put_timout_status),
+//#endif /* OPLUS_ARCH_EXTENDS */
 	SOC_SINGLE_EXT("BT set feedback channel", 0, 0, 1, 0,
 	btfm_get_feedback_ch_setting,
 	btfm_put_feedback_ch_setting)
@@ -131,10 +165,6 @@ static void btfm_slim_dai_shutdown(struct snd_pcm_substream *substream,
 		ch = btfmslim->rx_chs;
 		rxport = 1;
 		break;
-	case BTFM_BT_SPLIT_A2DP_SLIM_TX:
-		ch = btfmslim->tx_chs;
-		rxport = 0;
-		break;
 	case BTFM_SLIM_NUM_CODEC_DAIS:
 	default:
 		BTFMSLIM_ERR("dai->id is invalid:%d", dai->id);
@@ -165,7 +195,6 @@ static int btfm_slim_dai_hw_params(struct snd_pcm_substream *substream,
 	btfmslim = snd_soc_component_get_drvdata(dai->component);
 	btfmslim->bps = params_width(params);
 	btfmslim->direction = substream->stream;
-	btfmslim->dai_id = dai->id;
 	BTFMSLIM_DBG("dai->name = %s DAI-ID %x rate %d bps %d num_ch %d",
 		dai->name, dai->id, params_rate(params), params_width(params),
 		params_channels(params));
@@ -204,10 +233,6 @@ static int btfm_slim_dai_prepare(struct snd_pcm_substream *substream,
 	case BTFM_BT_SPLIT_A2DP_SLIM_RX:
 		ch = btfmslim->rx_chs;
 		rxport = 1;
-		break;
-	case BTFM_BT_SPLIT_A2DP_SLIM_TX:
-		ch = btfmslim->tx_chs;
-		rxport = 0;
 		break;
 	case BTFM_SLIM_NUM_CODEC_DAIS:
 	default:
@@ -303,7 +328,6 @@ static int btfm_slim_dai_get_channel_map(struct snd_soc_dai *dai,
 		/* fall through */
 		fallthrough;
 	case BTFM_BT_SCO_SLIM_TX:
-	case BTFM_BT_SPLIT_A2DP_SLIM_TX:
 		if (!tx_slot || !tx_num) {
 			BTFMSLIM_ERR("Invalid tx_slot %p or tx_num %p",
 				tx_slot, tx_num);
@@ -435,21 +459,6 @@ static struct snd_soc_dai_driver btfmslim_dai[] = {
 			.formats = SNDRV_PCM_FMTBIT_S16_LE, /* 16 bits */
 			.rate_max = 48000,
 			.rate_min = 48000,
-			.channels_min = 1,
-			.channels_max = 1,
-		},
-		.ops = &btfmslim_dai_ops,
-	},
-	{	/* Bluetooth Split A2DP sink: bt -> adsp */
-		.name = "btfm_bt_split_a2dp_slim_tx",
-		.id = BTFM_BT_SPLIT_A2DP_SLIM_TX,
-		.capture = {
-			.stream_name = "A2DP Tx Capture",
-			.rates = SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_48000
-				| SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE, /* 16 bits */
-			.rate_max = 96000,
-			.rate_min = 44100,
 			.channels_min = 1,
 			.channels_max = 1,
 		},

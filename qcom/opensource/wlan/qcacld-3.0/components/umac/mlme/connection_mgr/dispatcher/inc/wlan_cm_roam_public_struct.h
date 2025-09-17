@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -116,8 +116,6 @@
 
 /* Default value of WTC reason code */
 #define DISABLE_VENDOR_BTM_CONFIG 2
-
-#define VENDOR_ROAM_SCORE_ALGORITHM_1 1
 
 #ifdef WLAN_FEATURE_HOST_ROAM
 #define MAX_FTIE_SIZE CM_MAX_FTIE_SIZE
@@ -430,10 +428,6 @@ enum roam_fail_params {
  * @ROAM_FAIL_REASON_SCREEN_ACTIVITY: Roam fail reason screen activity happened
  * @ROAM_FAIL_REASON_OTHER_PRIORITY_ROAM_SCAN: Roam fail due to other priority
  * roam scan started.
- * @ROAM_FAIL_REASON_REASSOC_TO_SAME_AP: Host internal reason code. Reassoc
- * command rejected due to reassociation request received for same AP.
- * @ROAM_FAIL_REASON_MLD_EXTRA_SCAN_REQUIRED: Roaming is not triggered as part
- * of the first roam scan as additional scan is required to scan all MLD links
  * @ROAM_FAIL_REASON_UNKNOWN: Default reason
  */
 enum wlan_roam_failure_reason_code {
@@ -477,8 +471,6 @@ enum wlan_roam_failure_reason_code {
 	ROAM_FAIL_REASON_SCAN_CANCEL,
 	ROAM_FAIL_REASON_SCREEN_ACTIVITY,
 	ROAM_FAIL_REASON_OTHER_PRIORITY_ROAM_SCAN,
-	ROAM_FAIL_REASON_REASSOC_TO_SAME_AP,
-	ROAM_FAIL_REASON_MLD_EXTRA_SCAN_REQUIRED,
 	ROAM_FAIL_REASON_UNKNOWN = 255,
 };
 
@@ -1397,8 +1389,6 @@ struct wlan_roam_11k_offload_params {
  * @bss_load_threshold: BSS load threshold after which roam scan should trigger
  * @bss_load_sample_time: Time duration in milliseconds for which the bss load
  * trigger needs to be enabled
- * @bss_load_alpha: Factor for computing average bss load from current channel
- * utilization
  * @rssi_threshold_6ghz: RSSI threshold of the current connected AP below which
  * roam should be triggered if bss load threshold exceeds the configured value.
  * This value is applicable only when we are connected in 6GHz band.
@@ -1413,7 +1403,6 @@ struct wlan_roam_bss_load_config {
 	uint32_t vdev_id;
 	uint32_t bss_load_threshold;
 	uint32_t bss_load_sample_time;
-	uint32_t bss_load_alpha;
 	int32_t rssi_threshold_6ghz;
 	int32_t rssi_threshold_5ghz;
 	int32_t rssi_threshold_24ghz;
@@ -2247,38 +2236,6 @@ struct roam_msg_info {
 	uint32_t msg_param2;
 };
 
-#ifdef WLAN_FEATURE_11BE_MLO
-/**
- * struct roam_ml_info - Structure to hold the roamed link specific info
- * @link_addr: Self link address
- * @link_id:   IEEE Link id used for association
- * @link_accepted: True if link status is accepted. Else link status is rejected
- * @link_band: Band information of the link
- * @freq: Frequency of the link
- * @timestamp: FW timestamp (in milliseconds)
- */
-struct roam_ml_info {
-	struct qdf_mac_addr link_addr;
-	uint8_t link_id;
-	bool link_accepted;
-	enum reg_wifi_band link_band;
-	uint32_t freq;
-	uint64_t timestamp;
-};
-
-/**
- * struct roam_mlo_link_info - Roam message related information
- * @present:    Flag to check if the roam mlo link info tlv is present
- * @num_links:  Number of links
- * @ml_info:    Link information
- */
-struct roam_mlo_link_info {
-	bool present;
-	uint8_t num_links;
-	struct roam_ml_info ml_info[WLAN_MAX_ML_BSS_LINKS];
-};
-#endif
-
 /**
  * struct roam_event_rt_info - Roam event related information
  * @roam_scan_state: roam scan state notif value
@@ -2325,7 +2282,6 @@ enum roam_rt_stats_type {
  * reassociation response frame
  * @band: Band on which the packet is transmitted or received. Refer
  * enum wlan_diag_wifi_band
- * @link_info: Link information of associated links
  */
 struct roam_frame_info {
 	bool present;
@@ -2342,9 +2298,6 @@ struct roam_frame_info {
 	uint16_t retry_count;
 	uint16_t assoc_id;
 	uint8_t band;
-#ifdef WLAN_FEATURE_11BE_MLO
-	struct roam_mlo_link_info link_info;
-#endif
 };
 
 /**

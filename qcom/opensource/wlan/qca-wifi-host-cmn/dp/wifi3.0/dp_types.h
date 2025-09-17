@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1301,8 +1301,6 @@ struct dp_soc_stats {
 		uint32_t rx_hw_stats_requested;
 		/* Number of hw stats request timeout */
 		uint32_t rx_hw_stats_timeout;
-		/* Dropped fragment count */
-		uint32_t rx_frag_drop_cnt;
 
 		struct {
 			/* Invalid RBM error count */
@@ -1408,8 +1406,6 @@ struct dp_soc_stats {
 			uint32_t defrag_ad1_invalid;
 			/* decrypt error drop */
 			uint32_t decrypt_err_drop;
-			/* unencrypt error drop */
-			uint32_t unencrypt_err_drop;
 #ifdef GLOBAL_ASSERT_AVOIDANCE
 			/* rx_desc NULL war count*/
 			uint32_t rx_desc_null;
@@ -3271,8 +3267,6 @@ struct dp_soc {
 #endif
 	/* monitor interface flags */
 	uint32_t mon_flags;
-	/* flag to check if wds is not supported */
-	bool wds_not_supported;
 };
 
 #ifdef IPA_OFFLOAD
@@ -3338,7 +3332,6 @@ struct dp_ipa_resources {
  * 3 bits page id 0 ~ 7 for WIN
  * WBM Idle List Desc size = 128,
  * Num descs per page = 4096/128 = 32 for MCL
- * Num descs per page = 16384/128 = 128 for MCL with page size of 16K
  * Num descs per page = 2MB/128 = 16384 for WIN
  */
 /*
@@ -3351,10 +3344,6 @@ struct dp_ipa_resources {
 #if PAGE_SIZE == 4096
 #define LINK_DESC_PAGE_ID_MASK  0x007FE0
 #define LINK_DESC_ID_SHIFT      5
-#define LINK_DESC_ID_START_21_BITS_COOKIE 0x8000
-#elif PAGE_SIZE == 16384
-#define LINK_DESC_PAGE_ID_MASK 0x007F80
-#define LINK_DESC_ID_SHIFT      7
 #define LINK_DESC_ID_START_21_BITS_COOKIE 0x8000
 #elif PAGE_SIZE == 65536
 #define LINK_DESC_PAGE_ID_MASK  0x007E00
@@ -3981,7 +3970,6 @@ struct dp_vdev_stats {
 
 /* VDEV structure for data path state */
 struct dp_vdev {
-	struct cdp_vdev cdp_vdev;
 	/* OS device abstraction */
 	qdf_device_t osdev;
 
@@ -4135,7 +4123,7 @@ struct dp_vdev {
 	ol_txrx_classify_critical_pkt_fp tx_classify_critical_pkt_cb;
 
 	/* delete notifier to DP component */
-	ol_txrx_vdev_del_notify_cb vdev_del_notify;
+	ol_txrx_vdev_delete_cb vdev_del_notify;
 
 	/* deferred vdev deletion state */
 	struct {

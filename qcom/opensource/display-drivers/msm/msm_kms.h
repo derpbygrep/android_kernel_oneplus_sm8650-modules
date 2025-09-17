@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -112,9 +112,7 @@ struct msm_kms_funcs {
 				const int32_t connector_id);
 	/* pm suspend/resume hooks */
 	int (*pm_suspend)(struct device *dev);
-	int (*pm_freeze_late)(struct device *dev);
 	int (*pm_resume)(struct device *dev);
-	int (*pm_restore)(struct device *dev);
 	/* cleanup: */
 	void (*destroy)(struct msm_kms *kms);
 	/* get address space */
@@ -145,6 +143,10 @@ struct msm_kms_funcs {
 	int (*get_dsc_count)(const struct msm_kms *kms,
 			u32 hdisplay, u32 *num_dsc);
 	bool (*in_trusted_vm)(const struct msm_kms *kms);
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+	int (*iris_operate)(struct msm_kms *kms, u32 operate_type,
+			struct msm_iris_operate_value *operate_value);
+#endif
 };
 
 struct msm_kms {

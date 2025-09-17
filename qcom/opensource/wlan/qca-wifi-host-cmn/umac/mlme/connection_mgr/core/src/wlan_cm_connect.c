@@ -1453,10 +1453,6 @@ static QDF_STATUS cm_update_mlo_filter(struct wlan_objmgr_pdev *pdev,
 		 */
 		filter->match_mld_addr = true;
 		qdf_copy_macaddr(&filter->mld_addr, &cm_req->req.mld_addr);
-
-		/* Add link ID to the scan filter for partner link */
-		filter->match_link_id = true;
-		filter->link_id = cm_req->req.link_id;
 	}
 
 	mlme_debug(CM_PREFIX_FMT "band bitmap: 0x%x",
@@ -2468,7 +2464,7 @@ QDF_STATUS cm_connect_active(struct cnx_mgr *cm_ctx, wlan_cm_id *cm_id)
 			wlan_crypto_free_vdev_key(cm_ctx->vdev);
 	}
 	cm_fill_vdev_crypto_params(cm_ctx, req);
-	cm_store_wep_key(cm_ctx, req, *cm_id);
+	cm_store_wep_key(cm_ctx, &req->crypto, *cm_id);
 
 	if (mlo_is_sta_bridge_vdev(cm_ctx->vdev))
 		status = QDF_STATUS_SUCCESS;

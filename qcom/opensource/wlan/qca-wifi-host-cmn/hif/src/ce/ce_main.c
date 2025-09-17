@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1673,13 +1673,11 @@ void hif_ce_print_ring_stats(struct hif_opaque_softc *hif_ctx)
 		if (ce_state->src_ring) {
 			QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_FATAL,
 				  "ce%d:SW: sw_index %u write_index %u",
-				  ce_state->id,
 				  ce_state->src_ring->sw_index,
 				  ce_state->src_ring->write_index);
 
 			QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_FATAL,
 				  "ce%d:HW: read_index %u write_index %u",
-				  ce_state->id,
 				  CE_SRC_RING_READ_IDX_GET_FROM_REGISTER(scn, ce_state->ctrl_addr),
 				  CE_SRC_RING_WRITE_IDX_GET_FROM_REGISTER(scn, ce_state->ctrl_addr));
 		}
@@ -1687,13 +1685,11 @@ void hif_ce_print_ring_stats(struct hif_opaque_softc *hif_ctx)
 		if (ce_state->dest_ring) {
 			QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_FATAL,
 				  "ce%d:SW: sw_index %u write_index %u",
-				  ce_state->id,
 				  ce_state->dest_ring->sw_index,
 				  ce_state->dest_ring->write_index);
 
 			QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_FATAL,
 				  "ce%d:HW: read_index %u write_index %u",
-				  ce_state->id,
 				  CE_DEST_RING_READ_IDX_GET_FROM_REGISTER(scn, ce_state->ctrl_addr),
 				  CE_DEST_RING_WRITE_IDX_GET_FROM_REGISTER(scn, ce_state->ctrl_addr));
 		}
@@ -4321,7 +4317,6 @@ void hif_ce_stop(struct hif_softc *scn)
 	}
 
 	hif_buffer_cleanup(hif_state);
-	hif_flush_delayed_reg_write_work(scn);
 
 	for (pipe_num = 0; pipe_num < scn->ce_count; pipe_num++) {
 		struct HIF_CE_pipe_info *pipe_info;
@@ -4435,144 +4430,6 @@ void hif_get_target_ce_config(struct hif_softc *scn,
 			       shadow_cfg_sz_ret);
 }
 
-#ifdef CE_CMN_REG_CFG_QMI
-/**
- * hif_ce_cmn_cfg_supported() - Get whether support of Copy Engine common
- * registers configuration present or not.
- * @scn: HIF context
- *
- * Return: ce_cmn_reg_cfg_support_qmi
- */
-inline bool hif_ce_cmn_cfg_supported(struct hif_softc *scn)
-{
-	return scn->ce_cmn_reg_cfg_support_qmi;
-}
-
-/**
- * hif_get_num_ce_src_dest_valid() -Get count of total src and dest Copy engines
- * @scn: HIF context
- *
- * Return: Count of total valid src and dest ce (which host configures).
- */
-uint32_t hif_get_num_ce_src_dest_valid(struct hif_softc *scn)
-{
-	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
-	uint32_t ce_id;
-	struct CE_attr *attr;
-	uint32_t ce_valid_cnt = 0;
-
-	for (ce_id = 0; ce_id < scn->ce_count; ce_id++) {
-		attr = &hif_state->host_ce_config[ce_id];
-		if (attr->src_nentries || attr->dest_nentries)
-			ce_valid_cnt++;
-		else
-			continue;
-		}
-	return ce_valid_cnt;
-}
-
-/**
- * hif_get_common_reg_per_ce() -Get common ce register count
- *
- * @scn: HIF context
- *
- * Return: Number of common register per ce channel to be configured
- */
-uint32_t hif_get_common_reg_per_ce(struct hif_softc *scn)
-{
-	struct hif_opaque_softc *hif_hdl = GET_HIF_OPAQUE_HDL(scn);
-	struct hif_target_info *tgt_info = hif_get_target_info_handle(hif_hdl);
-	uint32_t ret_val;
-
-	switch (tgt_info->target_type) {
-	case TARGET_TYPE_WCN6450:
-		/* only CTRL1 register to be configured as of now*/
-		ret_val = 1;
-		break;
-	default:
-		ret_val = 0;
-		break;
-	}
-	return ret_val;
-}
-
-/**
- * hif_prepare_ce_cmn_reg_cfg() - Prepare CE common registers config
- * @scn: HIF context
- * @cfg: WLAN FW configuration
- *
- * Return: 0 on success.
- */
-static int hif_prepare_ce_cmn_reg_cfg(
-	struct hif_softc *scn,
-	struct pld_wlan_enable_cfg *cfg)
-{
-	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
-	int ret_val = 0;
-
-	/* Call API to get fw support
-	 * of CE common register config over QMI
-	 * If support is not present then host should
-	 * configure common CE registers.
-	 */
-	if (pld_ce_cmn_cfg_supported(scn->qdf_dev->dev)) {
-		hif_info("CE common reg cfg over QMI present");
-		scn->ce_cmn_reg_cfg_support_qmi = true;
-		/* prepre the common CE register config */
-		ret_val = hif_state->ce_services->ce_prepare_cmn_reg_cfg(
-				scn,
-				(struct CE_cmn_register_config **)
-					&cfg->ce_cmn_reg_cfg,
-				&cfg->num_ce_cmn_reg_config);
-	} else {
-		scn->ce_cmn_reg_cfg_support_qmi = false;
-	}
-
-	hif_info("No. of CE common reg cfg prepared %d",
-		 cfg->num_ce_cmn_reg_config);
-	return ret_val;
-}
-
-/**
- * free_ce_cmn_reg_cfg() - Free dynamically allocated memory
- * for CE common registers configuration
- * @cfg: WLAN FW configuration
- *
- * Return: None.
- */
-static inline void free_ce_cmn_reg_cfg(struct pld_wlan_enable_cfg *cfg)
-{
-	if (cfg->ce_cmn_reg_cfg)
-		qdf_mem_free(cfg->ce_cmn_reg_cfg);
-	cfg->ce_cmn_reg_cfg = NULL;
-}
-#else
-
-/**
- * hif_prepare_ce_cmn_reg_cfg() - Prepare CE common registers config
- * @scn: HIF context
- * @cfg: WLAN FW configuration
- *
- * Return: 0 on success.
- */
-static int hif_prepare_ce_cmn_reg_cfg(
-	struct hif_softc *scn,
-	struct pld_wlan_enable_cfg *cfg)
-{
-	return 0;
-}
-
-/**
- * free_ce_cmn_reg_cfg() - Free dynamically allocated memory
- * for CE common registers configuration
- * @cfg: WLAN FW configuration
- *
- * Return: None.
- */
-static inline void free_ce_cmn_reg_cfg(struct pld_wlan_enable_cfg *cfg)
-{
-}
-#endif /* CE_CMN_REG_CFG_QMI */
 #ifdef CONFIG_SHADOW_V3
 static void hif_print_hal_shadow_register_cfg(struct pld_wlan_enable_cfg *cfg)
 {
@@ -4721,15 +4578,10 @@ static inline void hif_config_rri_on_ddr(struct hif_softc *scn)
 	WRITE_CE_DDR_ADDRESS_FOR_RRI_LOW(scn, low_paddr);
 	WRITE_CE_DDR_ADDRESS_FOR_RRI_HIGH(scn, high_paddr);
 
-	/* If CE common register configuration over QMI is present ,
-	 * do not set the IDXUPD_EN here.
-	 */
-	if (!hif_ce_cmn_cfg_supported(scn)) {
-		for (i = 0; i < CE_COUNT; i++) {
-			attr = &hif_state->host_ce_config[i];
-			if (attr->src_nentries || attr->dest_nentries)
-				CE_IDX_UPD_EN_SET(scn, CE_BASE_ADDRESS(i));
-		}
+	for (i = 0; i < CE_COUNT; i++) {
+		attr = &hif_state->host_ce_config[i];
+		if (attr->src_nentries || attr->dest_nentries)
+			CE_IDX_UPD_EN_SET(scn, CE_BASE_ADDRESS(i));
 	}
 }
 #else
@@ -4827,8 +4679,8 @@ int hif_wlan_enable(struct hif_softc *scn)
 	struct hif_target_info *tgt_info = hif_get_target_info_handle(hif_hdl);
 	struct pld_wlan_enable_cfg cfg = { 0 };
 	enum pld_driver_mode mode;
-	int ret_val;
 	uint32_t con_mode = hif_get_conparam(scn);
+
 	hif_get_target_ce_config(scn,
 			(struct CE_pipe_config **)&cfg.ce_tgt_cfg,
 			&cfg.num_ce_tgt_cfg,
@@ -4841,10 +4693,6 @@ int hif_wlan_enable(struct hif_softc *scn)
 	cfg.num_ce_tgt_cfg /= sizeof(struct CE_pipe_config);
 	cfg.num_ce_svc_pipe_cfg /= sizeof(struct service_to_pipe);
 	cfg.num_shadow_reg_cfg /= sizeof(struct shadow_reg_cfg);
-
-	ret_val = hif_prepare_ce_cmn_reg_cfg(scn, &cfg);
-	if (ret_val < 0)
-		goto out;
 
 	switch (tgt_info->target_type) {
 	case TARGET_TYPE_KIWI:
@@ -4876,13 +4724,9 @@ int hif_wlan_enable(struct hif_softc *scn)
 		mode = PLD_MISSION;
 
 	if (BYPASS_QMI)
-		ret_val =  0;
+		return 0;
 	else
-		ret_val = pld_wlan_enable(scn->qdf_dev->dev, &cfg, mode);
-
-	free_ce_cmn_reg_cfg(&cfg);
-out:
-	return ret_val;
+		return pld_wlan_enable(scn->qdf_dev->dev, &cfg, mode);
 }
 
 #ifdef WLAN_FEATURE_EPPING

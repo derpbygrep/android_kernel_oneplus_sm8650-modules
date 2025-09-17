@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1116,12 +1116,40 @@ enum qca_nl80211_vendor_subcmds {
 	QCA_NL80211_VENDOR_SUBCMD_TID_TO_LINK_MAP = 229,
 	QCA_NL80211_VENDOR_SUBCMD_LINK_RECONFIG = 230,
 	QCA_NL80211_VENDOR_SUBCMD_TDLS_DISC_RSP_EXT = 231,
+	#ifdef OPLUS_BUG_STABILITY
+	// We need a common value to let this function work on different QCOM platform,
+	// which may have different SUBCMD defination, so assign a more large number for
+	// OPLUS command
+	OPLUS_NL80211_VENDOR_SUBCMD_MODIFY_ACL = 1001,
+	OPLUS_NL80211_VENDOR_SUBCMD_SET_MAX_ASSOC = 1002,
+	OPLUS_NL80211_VENDOR_SUBCMD_SET_WIFI_CONFIGURATION = 1003,
+	#endif /* OPLUS_BUG_STABILITY */
 	QCA_NL80211_VENDOR_SUBCMD_AUDIO_TRANSPORT_SWITCH = 232,
 	QCA_NL80211_VENDOR_SUBCMD_TX_LATENCY = 233,
 	QCA_NL80211_VENDOR_SUBCMD_RECONFIG_REMOVE_COMPLETE_EVENT = 234,
 	QCA_NL80211_VENDOR_SUBCMD_REGULATORY_TPC_INFO = 237,
 	QCA_NL80211_VENDOR_SUBCMD_FW_PAGE_FAULT_REPORT = 238,
 };
+
+#ifdef OPLUS_BUG_STABILITY
+// add for: OPLUS specific attr
+enum oplus_vendor_attr {
+	OPLUS_WLAN_VENDOR_ATTR_UNSPECIFIC = 0, /* cannot be use due to nla_parse() */
+	OPLUS_WLAN_VENDOR_ATTR_MAC_ADDR,
+	OPLUS_WLAN_VENDOR_ATTR_WETHER_BLOCK_CLIENT,
+	OPLUS_WLAN_VENDOR_ATTR_SAP_MAX_CLIENT_NUM,
+
+	//OPLUS_WIFI_VENDOR_EDIT_START
+	//Add for ULL TX 20M
+	OPLUS_WLAN_VENDOR_ATTR_CONFIG_MAX_TX_BANDWIDTH,
+	//OPLUS_WIFI_VENDOR_EDIT_END
+
+	/* add attr above */
+	OPLUS_WLAN_VENDOR_ATTR_LAST,
+	OPLUS_WLAN_VENDOR_ATTR_MAX =
+	OPLUS_WLAN_VENDOR_ATTR_LAST - 1,
+};
+#endif /* OPLUS_BUG_STABILITY */
 
 enum qca_wlan_vendor_tos {
 	QCA_WLAN_VENDOR_TOS_BK = 0,
@@ -1517,10 +1545,6 @@ enum qca_wlan_auth_type {
  * type for remote channel width greater than 160 MHz.
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_EHT_OPERATION: Attribute type for
  * sending EHT operation info.
- * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_ASSOCIATED_BW: Attribute type of u32
- *  for sending the associated bandwidth.
- *  Example: The driver will send an enum value of type nl80211_chan_width,
- *  such as NL80211_CHAN_WIDTH_20_NOHT.
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST: After last
  *
  */
@@ -1567,7 +1591,6 @@ enum qca_wlan_vendor_attr_get_station_info {
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_HE_OPERATION,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_CH_WIDTH_V2,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_EHT_OPERATION,
-	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_ASSOCIATED_BW,
 
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST,
@@ -4751,6 +4774,9 @@ enum qca_wlan_vendor_features {
 	QCA_WLAN_VENDOR_FEATURE_PROT_RANGE_NEGO_AND_MEASURE_AP = 21,
 	QCA_WLAN_VENDOR_FEATURE_AP_ALLOWED_FREQ_LIST = 22,
 	QCA_WLAN_VENDOR_FEATURE_ENHANCED_AUDIO_EXPERIENCE_OVER_WLAN = 23,
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	OPLUS_WLAN_VENDOR_FEATURE_VENDOR_FT = 30,
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	NUM_QCA_WLAN_VENDOR_FEATURES /* keep last */
 };
 
@@ -5927,29 +5953,6 @@ enum qca_wlan_vendor_attr_config {
 	 * association.
 	 */
 	QCA_WLAN_VENDOR_ATTR_CONFIG_KEEP_ALIVE_INTERVAL = 108,
-
-	/* 8-bit unsigned value to configure reduced power scan mode.
-	 *
-	 * This attribute is used to configure the driver to optimize power
-	 * during scan. For e.g., the driver can switch to 1x1 from 2x2 mode
-	 * for additional power save.
-	 *
-	 * 1 - Enable reduced power scan mode.
-	 * 0 - Disable reduced power scan mode.
-	 */
-	QCA_WLAN_VENDOR_ATTR_CONFIG_REDUCED_POWER_SCAN_MODE = 109,
-
-	/* 8-bit unsigned integer to configure the driver to follow AP's
-	 * preference values to select a roam candidate from BTM request.
-	 *
-	 * This attribute is used to configure the driver to select the roam
-	 * candidate based on AP advertised preference values. If not set,
-	 * the driver uses its internal scoring algorithm to do the same.
-	 *
-	 * 1 - STA follows AP's preference values to select a roam candidate
-	 * 0 - STA uses internal scoring algorithm to select a roam candidate
-	 */
-	QCA_WLAN_VENDOR_ATTR_CONFIG_FOLLOW_AP_PREFERENCE_FOR_CNDS_SELECT = 121,
 
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_CONFIG_AFTER_LAST,

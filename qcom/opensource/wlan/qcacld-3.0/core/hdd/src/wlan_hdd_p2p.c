@@ -1389,6 +1389,9 @@ static void wlan_hdd_update_mcc_p2p_quota(struct hdd_adapter *adapter,
 	}
 }
 
+extern void wlan_hdd_update_private_mcc_p2p_quota(struct hdd_adapter *adapter, int sta_quota);
+// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
+
 int32_t wlan_hdd_set_mas(struct hdd_adapter *adapter, uint8_t mas_value)
 {
 	struct hdd_context *hdd_ctx;
@@ -1418,9 +1421,14 @@ int32_t wlan_hdd_set_mas(struct hdd_adapter *adapter, uint8_t mas_value)
 				return -EAGAIN;
 			}
 		}
-
-		/* Config p2p quota */
-		wlan_hdd_update_mcc_p2p_quota(adapter, true);
+		// the original is only source or sink 0/1, >=10 stands for quota
+		if (mas_value >= 10) {
+			wlan_hdd_update_private_mcc_p2p_quota(adapter, mas_value);
+		} else {
+			/* Config p2p quota */
+			wlan_hdd_update_mcc_p2p_quota(adapter, true);
+		}
+		// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
 	} else {
 		hdd_info("Miracast is OFF. Enable MAS and reset P2P quota");
 		wlan_hdd_update_mcc_p2p_quota(adapter, false);
@@ -1464,7 +1472,7 @@ static uint32_t set_first_connection_operating_channel(
 	oper_chan_freq = hdd_get_operating_chan_freq(hdd_ctx, dev_mode);
 	if (!oper_chan_freq) {
 		hdd_err(" First adapter operating channel is invalid");
-		return set_value;
+		return -EINVAL;
 	}
 	operating_channel = wlan_reg_freq_to_chan(hdd_ctx->pdev,
 						  oper_chan_freq);
@@ -1504,9 +1512,9 @@ static uint32_t set_second_connection_operating_channel(
 						  policy_mgr_get_mcc_operating_channel(
 						  hdd_ctx->psoc, vdev_id));
 
-	if (!operating_channel) {
+	if (operating_channel == 0) {
 		hdd_err("Second adapter operating channel is invalid");
-		return set_value;
+		return -EINVAL;
 	}
 
 	hdd_info("Second connection channel No.:%d and quota:%dms",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 /*
@@ -66,9 +66,6 @@
 #define SIGIO_GPIO_LOW           0x00000000
 #define SIGIO_SSR_ON_UWB         0x00000001
 #define SIGIO_UWB_SSR_COMPLETED  0x00000002
-
-#define RESETB_GPIO_HIGH         0x00000001
-#define RESETB_GPIO_LOW          0x00000000
 
 #define CRASH_REASON_NOT_FOUND  ((char *)"Crash reason not found")
 
@@ -179,27 +176,6 @@ static struct vreg_data bt_vregs_info_qca6xx0[] = {
 		{BT_VDD_IPA_2p2, BT_VDD_IPA_2p2_CURRENT}},
 };
 
-// Regulator structure for WCN6450 BT SoC series
-static struct vreg_data bt_vregs_info_wcn6450[] = {
-	{NULL, "qcom,bt-vdd-io",	  1256000, 1408000, 0, false, true,
-		{BT_VDD_IO_LDO, BT_VDD_IO_LDO_CURRENT}},
-	{NULL, "qcom,bt-vdd-aon",	  920000,  1040000,	0, false, true,
-		{BT_VDD_AON_LDO, BT_VDD_AON_LDO_CURRENT}},
-	/* BT_CX_MX */
-	{NULL, "qcom,bt-vdd-dig",	   920000,	1040000,  0, false, true,
-		{BT_VDD_DIG_LDO, BT_VDD_DIG_LDO_CURRENT}},
-	{NULL, "qcom,bt-vdd-rfa-0p8",  920000,  1040000,  0, false, true,
-		{BT_VDD_RFA_0p8, BT_VDD_RFA_0p8_CURRENT}},
-	{NULL, "qcom,bt-vdd-rfa1",	   1856000, 2040000, 0, false, true,
-		{BT_VDD_RFA1_LDO, BT_VDD_RFA1_LDO_CURRENT}},
-	{NULL, "qcom,bt-vdd-rfa2",	   1256000, 1408000, 0, false, true,
-		{BT_VDD_RFA2_LDO, BT_VDD_RFA2_LDO_CURRENT}},
-	{NULL, "qcom,bt-vdd-pa",	   3300000, 3300000, 0, false, true,
-		{BT_VDD_PA_LDO, BT_VDD_PA_LDO_CURRENT}},
-	{NULL, "qcom,bt-vdd-pa-5g",	   3300000, 3300000, 0, false, true,
-		{BT_VDD_PA_LDO, BT_VDD_PA_LDO_CURRENT}},
-};
-
 // Regulator structure for kiwi BT SoC series
 static struct vreg_data bt_vregs_info_kiwi[] = {
 	{NULL, "qcom,bt-vdd18-aon",      1800000, 1800000, 0, false, true,
@@ -302,12 +278,6 @@ static struct pwr_data bt_vreg_info_wcn6750 = {
 	.bt_num_vregs = ARRAY_SIZE(bt_vregs_info_qca6xx0),
 };
 
-static struct pwr_data bt_vreg_info_wcn6450 = {
-	.compatible = "qcom,wcn6450-bt",
-	.bt_vregs = bt_vregs_info_wcn6450,
-	.bt_num_vregs = ARRAY_SIZE(bt_vregs_info_wcn6450),
-};
-
 static struct pwr_data bt_vreg_info_peach = {
 	.compatible = "qcom,peach-bt",
 	.platform_vregs = bt_vregs_info_peach,
@@ -316,12 +286,6 @@ static struct pwr_data bt_vreg_info_peach = {
 	//.bt_vregs = platform_vregs_info,
 	//.uwb_num_vregs = ARRAY_SIZE(uwb_vregs_info),
 	//.bt_num_vregs = ARRAY_SIZE(platform_vregs_info),
-};
-
-static struct pwr_data vreg_info_wcn786x = {
-	.compatible = "qcom,wcn786x",
-	.platform_vregs = bt_vregs_info_peach,
-	.platform_num_vregs = ARRAY_SIZE(bt_vregs_info_peach),
 };
 
 static const struct of_device_id bt_power_match_table[] = {
@@ -333,10 +297,8 @@ static const struct of_device_id bt_power_match_table[] = {
 	{	.compatible = "qcom,kiwi-no-share-ant-power",
 			.data = &bt_vreg_info_kiwi_no_share_ant_power},
 	{	.compatible = "qcom,wcn6750-bt", .data = &bt_vreg_info_wcn6750},
-	{   .compatible = "qcom,wcn6450-bt", .data = &bt_vreg_info_wcn6450},
 	{	.compatible = "qcom,bt-qca-converged", .data = &bt_vreg_info_converged},
 	{	.compatible = "qcom,peach-bt", .data = &bt_vreg_info_peach},
-	{	.compatible = "qcom,wcn786x", .data = &vreg_info_wcn786x},
 	{},
 };
 
@@ -347,7 +309,7 @@ static struct class *bt_class;
 static int bt_major;
 static int soc_id;
 static bool probe_finished;
-char *default_crash_reason = "Crash reason not found";
+struct mutex pwr_release;
 
 static void bt_power_vote(struct work_struct *work);
 
@@ -716,34 +678,6 @@ void bt_configure_wakeup_gpios(int on)
 }
 #endif
 
-static int bt_pull_resetb(int resetb_gpio, int value)
-{
-	int rc = 0;
-
-	rc = gpio_direction_output(resetb_gpio, value);
-	if (rc) {
-		pr_err("%s: Unable to set direction\n", __func__);
-		return rc;
-	}
-	return rc;
-}
-
-static int bt_resetb_operation(int resetb)
-{
-	int rc = 0;
-
-	/* making resetb to low */
-	pr_info("BTON: Turn bt_resetb_gpio to low\n");
-	rc = bt_pull_resetb(resetb, RESETB_GPIO_LOW);
-	if (rc)
-		return rc;
-	msleep(20);
-	/* making resetb to high after delay */
-	pr_info("BTON: Turn bt_resetb_gpio to High\n");
-	rc = bt_pull_resetb(resetb, RESETB_GPIO_HIGH);
-	return rc;
-}
-
 static int bt_configure_gpios(int on)
 {
 	int rc = 0;
@@ -751,7 +685,6 @@ static int bt_configure_gpios(int on)
 	int wl_reset_gpio = pwr_data->wl_gpio_sys_rst;
 	int bt_sw_ctrl_gpio  =  pwr_data->bt_gpio_sw_ctrl;
 	int bt_debug_gpio  =  pwr_data->bt_gpio_debug;
-	int bt_resetb_gpio = pwr_data->bt_gpio_resetb;
 	int assert_dbg_gpio = 0;
 
 	if (on) {
@@ -760,14 +693,6 @@ static int bt_configure_gpios(int on)
 			pr_err("%s: unable to request gpio %d (%d)\n",
 					__func__, bt_reset_gpio, rc);
 			return rc;
-		}
-		if (bt_resetb_gpio  >=  0) {
-			rc = gpio_request(bt_resetb_gpio, "bt_resetb_gpio_n");
-			if (rc) {
-				pr_err("%s: unable to request gpio %d (%d)\n",
-						__func__, bt_resetb_gpio, rc);
-				return rc;
-			}
 		}
 		pr_err("BTON:Turn Bt OFF asserting BT_EN to low\n");
 		pr_err("bt-reset-gpio(%d) value(%d)\n", bt_reset_gpio,
@@ -830,18 +755,12 @@ static int bt_configure_gpios(int on)
 				}
 				power_src.platform_state[BT_RESET_GPIO] =
 					gpio_get_value(bt_reset_gpio);
-				if (bt_resetb_gpio  >=  0) {
-					pr_err("BTON:Turn resetb High\n");
-					bt_pull_resetb(bt_resetb_gpio, RESETB_GPIO_HIGH);
-				}
 			}
 			pr_err("BTON: WLAN OFF waiting for 100ms delay\n");
 			pr_err("for AON output to fully discharge\n");
 			msleep(100);
 			pr_err("BTON: WLAN OFF Asserting BT_EN to high\n");
 			btpower_set_xo_clk_gpio_state(true);
-			if (bt_resetb_gpio  >=  0)
-				bt_resetb_operation(bt_resetb_gpio);
 			rc = gpio_direction_output(bt_reset_gpio, 1);
 			if (rc) {
 				pr_err("%s: Unable to set direction\n", __func__);
@@ -934,7 +853,7 @@ static int bt_regulators_pwr(int pwr_state)
 	bt_num_vregs =  pwr_data->bt_num_vregs;
 
 	if (!bt_num_vregs) {
-		pr_warn("%s: not available to %s\n",
+		pr_warn("%s: not avilable to %s\n",
 			__func__, ConvertRegisterModeToString(pwr_state));
 		return 0;
 	}
@@ -1004,8 +923,6 @@ gpio_fail:
 			gpio_free(pwr_data->bt_gpio_debug);
 		if (pwr_data->bt_chip_clk)
 			bt_clk_disable(pwr_data->bt_chip_clk);
-		if (pwr_data->bt_gpio_resetb  >  0)
-			gpio_free(pwr_data->bt_gpio_resetb);
 clk_fail:
 regulator_fail:
 		for (i = 0; i < bt_num_vregs; i++) {
@@ -1035,7 +952,7 @@ static int uwb_regulators_pwr(int pwr_state)
 	uwb_num_vregs =  pwr_data->uwb_num_vregs;
 
 	if (!uwb_num_vregs) {
-		pr_warn("%s: not available to %s\n",
+		pr_warn("%s: not avilable to %s\n",
 			__func__, ConvertRegisterModeToString(pwr_state));
 		return 0;
 	}
@@ -1414,13 +1331,6 @@ static int get_gpio_dt_pinfo(struct platform_device *pdev) {
 		pr_err("%s: wl-reset-gpio not provided in device tree\n",
 			__func__);
 
-	pwr_data->bt_gpio_resetb =
-		of_get_named_gpio(child,
-					"qcom,wl-resetb-gpio", 0);
-	if (pwr_data->bt_gpio_resetb < 0)
-		pr_err("%s: bt_gpio_resetb not provided in device tree\n",
-			__func__);
-
 	ret = of_property_read_u32(child, "mpm_wake_set_gpios",
 				  &pwr_data->sw_cntrl_gpio);
 	if (ret)
@@ -1648,9 +1558,7 @@ static int bt_power_probe(struct platform_device *pdev)
 	pwr_data->pdev = pdev;
 
 	pwr_data->is_ganges_dt = of_property_read_bool(pdev->dev.of_node,
-							"qcom,peach-bt") ||
-							of_property_read_bool(pdev->dev.of_node,
-							"qcom,wcn786x");
+							"qcom,peach-bt");
 
 	pr_info("%s: is_ganges_dt = %d\n", __func__, pwr_data->is_ganges_dt);
 
@@ -1716,17 +1624,21 @@ static int bt_power_probe(struct platform_device *pdev)
 	return 0;
 
 free_pdata:
+	mutex_lock(&pwr_release);
 	kfree(pwr_data);
+	mutex_unlock(&pwr_release);
 	return ret;
 }
 
 static int bt_power_remove(struct platform_device *pdev)
 {
+	mutex_lock(&pwr_release);
 	dev_dbg(&pdev->dev, "%s\n", __func__);
 	probe_finished = false;
 	btpower_rfkill_remove(pdev);
 	bt_power_vreg_put();
 	kfree(pwr_data);
+	mutex_unlock(&pwr_release);
 	return 0;
 }
 
@@ -2414,32 +2326,6 @@ int btpower_process_access_req(unsigned int cmd, int req)
 	return ret;
 }
 
-int bt_kernel_panic(char *arg) {
-	int ret = 0;
-
-	pr_info("%s\n", __func__);
-
-	if (copy_from_user(&CrashInfo, (char *)arg, sizeof(CrashInfo))) {
-		pr_err("%s: failed copy to panic reason from BT-Transport\n",
-			__func__);
-		memset(&CrashInfo, 0, sizeof(CrashInfo));
-		strlcpy(CrashInfo. PrimaryReason,
-			default_crash_reason, strlen(default_crash_reason));
-		strlcpy(CrashInfo. SecondaryReason,
-			default_crash_reason, strlen(default_crash_reason));
-		ret = -EFAULT;
-	}
-
-	pr_err("%s: BT kernel panic Primary reason = %s, Secondary reason = %s\n",
-		__func__, CrashInfo.PrimaryReason, CrashInfo.SecondaryReason);
-
-	panic("%s: BT kernel panic Primary reason = %s, Secondary reason = %s\n",
-		__func__, CrashInfo.PrimaryReason, CrashInfo.SecondaryReason);
-
-	return ret;
-}
-
-
 static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
@@ -2594,8 +2480,20 @@ static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		btpower_enable_ipa_vreg(pwr_data);
 		break;
 	case BT_CMD_KERNEL_PANIC:
+
 		pr_err("%s: BT_CMD_KERNEL_PANIC\n", __func__);
-		ret = bt_kernel_panic((char *)arg);
+
+		if (copy_from_user(&CrashInfo, (char *)arg, sizeof(CrashInfo))) {
+			pr_err("%s: copy to user failed\n", __func__);
+			ret = -EFAULT;
+		}
+
+		pr_err("%s: BT kernel panic Primary reason = %s, Secondary reason = %s\n",
+			__func__, CrashInfo.PrimaryReason, CrashInfo.SecondaryReason);
+
+		panic("%s: BT kernel panic Primary reason = %s, Secondary reason = %s\n",
+			__func__, CrashInfo.PrimaryReason, CrashInfo.SecondaryReason);
+
 		break;
 	case UWB_CMD_KERNEL_PANIC:
 		pr_err("%s: UWB_CMD_KERNEL_PANIC\n", __func__);
@@ -2618,6 +2516,62 @@ static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
+static int bt_power_release(struct inode *inode, struct file *file)
+{
+
+	mutex_lock(&pwr_release);
+
+	if (!pwr_data || !probe_finished) {
+		pr_err("%s: BTPower Probing Pending.Try Again\n", __func__);
+		return -EAGAIN;
+	}
+
+	pwr_data->reftask = get_current();
+
+	if (pwr_data->reftask_bt != NULL) {
+		if (pwr_data->reftask->tgid == pwr_data->reftask_bt->tgid)
+		{
+			pr_err("%s called by BT service(PID-%d)\n",
+					__func__, pwr_data->reftask->tgid);
+/*
+			if(get_pwr_state() == BT_ON)
+			{
+				bt_regulators_pwr(POWER_DISABLE);
+				platform_regulators_pwr(POWER_DISABLE);
+				update_pwr_state(IDLE);
+
+			}
+			else if (get_pwr_state() == ALL_CLIENTS_ON)
+			{
+				bt_regulators_pwr(POWER_DISABLE);
+				update_pwr_state(UWB_ON);
+			}
+*/
+		}
+	} else if (pwr_data->reftask_uwb != NULL) {
+		if (pwr_data->reftask->tgid == pwr_data->reftask_uwb->tgid)
+		{
+			pr_err("%s called by uwb service(PID-%d)\n",
+					__func__, pwr_data->reftask->tgid);
+/*
+			if(get_pwr_state() == UWB_ON)
+			{
+				uwb_regulators_pwr(POWER_DISABLE);
+				platform_regulators_pwr(POWER_DISABLE);
+				update_pwr_state(IDLE);
+			}
+			else if (get_pwr_state() == ALL_CLIENTS_ON)
+			{
+				uwb_regulators_pwr(POWER_DISABLE);
+				update_pwr_state(BT_ON);
+			}
+*/
+		}
+	}
+	mutex_unlock(&pwr_release);
+	return 0;
+}
+
 static struct platform_driver bt_power_driver = {
 	.probe = bt_power_probe,
 	.remove = bt_power_remove,
@@ -2630,6 +2584,7 @@ static struct platform_driver bt_power_driver = {
 static const struct file_operations bt_dev_fops = {
 	.unlocked_ioctl = bt_ioctl,
 	.compat_ioctl = bt_ioctl,
+	.release = bt_power_release,
 };
 
 static int __init btpower_init(void)
@@ -2663,6 +2618,8 @@ static int __init btpower_init(void)
 		pr_err("%s: failed to allocate char dev\n", __func__);
 		goto device_err;
 	}
+
+	mutex_init(&pwr_release);
 	return 0;
 
 device_err:

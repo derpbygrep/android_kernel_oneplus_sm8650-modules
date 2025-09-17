@@ -502,7 +502,6 @@ int dfc_qmap_client_init(void *port, int index, struct svc_info *psvc,
 			 struct qmi_info *qmi)
 {
 	struct dfc_qmi_data *data;
-	int rc;
 
 	if (!port || !qmi)
 		return -EINVAL;
@@ -523,13 +522,7 @@ int dfc_qmap_client_init(void *port, int index, struct svc_info *psvc,
 	qmi->dfc_clients[index] = (void *)data;
 	rcu_assign_pointer(qmap_dfc_data, data);
 
-	if ((rc = rmnet_qmap_init(port)) < 0) {
-		RCU_INIT_POINTER(qmap_dfc_data, NULL);
-		synchronize_rcu();
-
-		kfree(data);
-		return -EFAULT;
-	}
+	rmnet_qmap_init(port);
 
 	trace_dfc_client_state_up(data->index, data->svc.instance,
 				  data->svc.ep_type, data->svc.iface_id);

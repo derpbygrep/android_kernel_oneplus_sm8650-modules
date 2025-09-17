@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/module.h>
 #include <linux/rpmsg.h>
@@ -247,24 +248,19 @@ static int delete_dsp_session(struct msm_cvp_inst *inst,
 			dprintk(CVP_DSP, "%s find device addr 0x%x\n",
 				__func__, buf->smem->device_addr);
 
-			if (buf->ownership == CLIENT) {
-				msm_cvp_unmap_smem(inst, buf->smem, "unmap dsp");
-				msm_cvp_smem_put_dma_buf(buf->smem->dma_buf);
-			} else if (buf->ownership == DSP) {
-				rc = eva_fastrpc_dev_unmap_dma(
-						frpc_node->cvp_fastrpc_device,
-						buf);
-				if (rc)
-					dprintk_rl(CVP_WARN,
-							"%s Failed to unmap buffer 0x%x\n",
-							__func__, rc);
+			rc = eva_fastrpc_dev_unmap_dma(
+					frpc_node->cvp_fastrpc_device,
+					buf);
+			if (rc)
+				dprintk_rl(CVP_WARN,
+					"%s Failed to unmap buffer 0x%x\n",
+					__func__, rc);
 
-				rc = cvp_release_dsp_buffers(inst, buf);
-				if (rc)
-					dprintk(CVP_ERR,
-							"%s Failed to free buffer 0x%x\n",
-							__func__, rc);
-			}
+			rc = cvp_release_dsp_buffers(inst, buf);
+			if (rc)
+				dprintk(CVP_ERR,
+					"%s Failed to free buffer 0x%x\n",
+					__func__, rc);
 
 			list_del(&buf->list);
 
@@ -1393,7 +1389,6 @@ void __dsp_cvp_sess_create(struct cvp_dsp_cmd_msg *cmd)
 {
 	struct cvp_dsp_apps *me = &gfa_cv;
 	struct msm_cvp_inst *inst = NULL;
-	struct msm_cvp_core *core = NULL;
 	uint64_t inst_handle = 0;
 	uint32_t pid;
 	int rc = 0;
@@ -1405,12 +1400,6 @@ void __dsp_cvp_sess_create(struct cvp_dsp_cmd_msg *cmd)
 	struct fastrpc_device *frpc_device;
 
 	cmd->ret = 0;
-	core = cvp_driver->cvp_core;
-	if (!core) {
-		dprintk(CVP_ERR, "%s CVP core not initialized\n", __func__);
-		cmd->ret = -1;
-		return;
-	}
 
 	dprintk(CVP_DSP,
 		"%s sess Type %d Mask %d Prio %d Sec %d hdl 0x%x\n",
@@ -1419,17 +1408,6 @@ void __dsp_cvp_sess_create(struct cvp_dsp_cmd_msg *cmd)
 		dsp2cpu_cmd->session_prio,
 		dsp2cpu_cmd->is_secure,
 		dsp2cpu_cmd->pid);
-
-	core->resources.max_inst_count = MAX_SUPPORTED_INSTANCES;
-	if (msm_cvp_check_for_inst_overload(core, &rc)) {
-		dprintk(CVP_ERR, "Reached EVA session limit, can not create new session\n");
-		cmd->ret = -1;
-		mutex_lock(&core->lock);
-		list_for_each_entry(inst, &core->instances, list)
-			cvp_print_inst(CVP_ERR, inst);
-		mutex_unlock(&core->lock);
-		return;
-	}
 
 	rc = eva_fastrpc_driver_register(dsp2cpu_cmd->pid);
 	if (rc) {
@@ -1620,7 +1598,8 @@ void __dsp_cvp_power_req(struct cvp_dsp_cmd_msg *cmd)
 			dsp2cpu_cmd->session_cpu_high,
 			dsp2cpu_cmd->session_cpu_low);
 
-	if (!inst) {
+	if (!inst || !is_cvp_inst_valid(inst)) {
+		dprintk(CVP_ERR, "%s incorrect session ID %llx\n", __func__, inst);
 		cmd->ret = -1;
 		goto dsp_fail_power_req;
 	}

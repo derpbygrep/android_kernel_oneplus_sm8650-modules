@@ -29,6 +29,18 @@ def define_pineapple(t, v, lt=None):
             "CONFIG_MSM_MMRM",
             "CONFIG_QTI_HW_FENCE",
             "CONFIG_QCOM_SPEC_SYNC",
+#ifdef OPLUS_FEATURE_DISPLAY
+                "OPLUS_FEATURE_DISPLAY",
+                "OPLUS_FEATURE_DISPLAY_ADFR",
+                "OPLUS_FEATURE_DISPLAY_HIGH_PRECISION",
+                "OPLUS_FEATURE_DISPLAY_TEMP_COMPENSATION",
+                "OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT",
+                "OPLUS_TRACKPOINT_REPORT",
+#endif /* OPLUS_FEATURE_DISPLAY */
+#ifdef CONFIG_PXLW_IRIS
+            "CONFIG_PXLW_IRIS",
+            "PXLW_IRIS_DUAL",
+#endif /* CONFIG_PXLW_IRIS */
             "CONFIG_MSM_EXT_DISPLAY",
         ],
         lunch_target = lt,
@@ -93,7 +105,6 @@ def define_volcano(t, v, lt=None):
             "CONFIG_SYNC_FILE",
             "CONFIG_DRM_MSM_DSI",
             "CONFIG_DRM_MSM_DP",
-            "CONFIG_DRM_MSM_DP_MST",
             "CONFIG_DSI_PARSER",
             "CONFIG_DRM_SDE_WB",
             "CONFIG_DRM_SDE_RSC",
@@ -106,31 +117,18 @@ def define_volcano(t, v, lt=None):
             "CONFIG_QCOM_SPEC_SYNC",
             "CONFIG_MSM_EXT_DISPLAY",
             "CONFIG_DEBUG_FS",
-        ],
-        lunch_target = lt,
-)
-
-def define_neo_la(t, v, lt=None):
-    define_target_variant_modules(
-        target = t,
-        variant = v,
-        registry = display_driver_modules,
-        modules = [
-            "msm_drm",
-        ],
-         config_options = [
-            "CONFIG_DRM_MSM",
-            "CONFIG_DRM_MSM_SDE",
-            "CONFIG_SYNC_FILE",
-            "CONFIG_DRM_MSM_DSI",
-            "CONFIG_DSI_PARSER",
-            "CONFIG_QCOM_MDSS_PLL",
-            "CONFIG_DRM_SDE_RSC",
-            "CONFIG_DRM_SDE_WB",
-            "CONFIG_DRM_MSM_REGISTER_LOGGING",
-            "CONFIG_DISPLAY_BUILD",
-            "CONFIG_THERMAL_OF",
-            "CONFIG_DEBUG_FS",
+#ifdef OPLUS_FEATURE_DISPLAY
+                "OPLUS_FEATURE_DISPLAY",
+                "OPLUS_FEATURE_DISPLAY_ADFR",
+                "OPLUS_FEATURE_DISPLAY_HIGH_PRECISION",
+                "OPLUS_FEATURE_DISPLAY_TEMP_COMPENSATION",
+                "OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT",
+                "OPLUS_TRACKPOINT_REPORT",
+#endif /* OPLUS_FEATURE_DISPLAY */
+#ifdef CONFIG_PXLW_IRIS
+            "CONFIG_PXLW_IRIS",
+            "PXLW_IRIS_DUAL",
+#endif /* CONFIG_PXLW_IRIS */
         ],
         lunch_target = lt,
 )
@@ -143,9 +141,8 @@ def define_display_target():
             define_pitti(t, v)
         if t == "pineapple":
             define_pineapple(t, v)
-        if t == "neo-la":
-            define_neo_la(t, v)
 
     for (lt, t, v) in get_all_lunch_target_base_target_variants():
+        print(lt)
         if lt == "volcano":
             define_volcano(t, v, lt)

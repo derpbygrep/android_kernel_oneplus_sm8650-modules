@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -3484,37 +3484,7 @@ void sme_dhcp_done_ind(mac_handle_t mac_handle, uint8_t session_id)
 		sme_err("Session: %d not found", session_id);
 		return;
 	}
-
 	session->dhcp_done = true;
-	session->dhcp_in_progress = false;
-}
-
-bool sme_get_dhcp_status(mac_handle_t mac_handle, uint8_t session_id)
-{
-	struct mac_context *mac = MAC_CONTEXT(mac_handle);
-	struct csr_roam_session *session;
-	QDF_STATUS status;
-
-	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		sme_err("Failed to acquire sme lock");
-		return false;
-	}
-
-	session = CSR_GET_SESSION(mac, session_id);
-	if (!session) {
-		sme_err("Session: %d not found", session_id);
-		sme_release_global_lock(&mac->sme);
-		return false;
-	}
-
-	if (session->dhcp_in_progress) {
-		sme_release_global_lock(&mac->sme);
-		return true;
-	}
-
-	sme_release_global_lock(&mac->sme);
-	return false;
 }
 
 QDF_STATUS sme_roam_stop_bss(mac_handle_t mac_handle, uint8_t vdev_id)
@@ -3946,14 +3916,18 @@ QDF_STATUS sme_enable_active_apf_mode_ind(mac_handle_t mac_handle,
 	struct mac_context *mac = MAC_CONTEXT(mac_handle);
 	struct scheduler_msg message = {0};
 	tAniDHCPInd *pMsg;
+	struct csr_roam_session *pSession;
 
 	status = sme_acquire_global_lock(&mac->sme);
 	if (status == QDF_STATUS_SUCCESS) {
-		if (!CSR_IS_SESSION_VALID(mac, sessionId)) {
-			sme_err("invalid vdev %d", sessionId);
+		pSession = CSR_GET_SESSION(mac, sessionId);
+
+		if (!pSession) {
+			sme_err("Session: %d not found", sessionId);
 			sme_release_global_lock(&mac->sme);
-			return QDF_STATUS_E_INVAL;
+			return QDF_STATUS_E_FAILURE;
 		}
+		pSession->dhcp_done = false;
 
 		pMsg = qdf_mem_malloc(sizeof(tAniDHCPInd));
 		if (!pMsg) {
@@ -3996,14 +3970,18 @@ QDF_STATUS sme_disable_active_apf_mode_ind(mac_handle_t mac_handle,
 	struct mac_context *mac = MAC_CONTEXT(mac_handle);
 	struct scheduler_msg message = {0};
 	tAniDHCPInd *pMsg;
+	struct csr_roam_session *pSession;
 
 	status = sme_acquire_global_lock(&mac->sme);
 	if (status == QDF_STATUS_SUCCESS) {
-		if (!CSR_IS_SESSION_VALID(mac, sessionId)) {
-			sme_err("invalid vdev %d", sessionId);
+		pSession = CSR_GET_SESSION(mac, sessionId);
+
+		if (!pSession) {
+			sme_err("Session: %d not found", sessionId);
 			sme_release_global_lock(&mac->sme);
-			return QDF_STATUS_E_INVAL;
+			return QDF_STATUS_E_FAILURE;
 		}
+		pSession->dhcp_done = false;
 
 		pMsg = qdf_mem_malloc(sizeof(tAniDHCPInd));
 		if (!pMsg) {
@@ -4070,7 +4048,6 @@ QDF_STATUS sme_dhcp_start_ind(mac_handle_t mac_handle,
 			return QDF_STATUS_E_FAILURE;
 		}
 		pSession->dhcp_done = false;
-		pSession->dhcp_in_progress = true;
 
 		pMsg = qdf_mem_malloc(sizeof(tAniDHCPInd));
 		if (!pMsg) {
@@ -4098,7 +4075,6 @@ QDF_STATUS sme_dhcp_start_ind(mac_handle_t mac_handle,
 			sme_err("Post DHCP Start MSG fail");
 			qdf_mem_free(pMsg);
 			status = QDF_STATUS_E_FAILURE;
-			pSession->dhcp_in_progress = false;
 		}
 		sme_release_global_lock(&mac->sme);
 	}
@@ -4137,7 +4113,6 @@ QDF_STATUS sme_dhcp_stop_ind(mac_handle_t mac_handle,
 			return QDF_STATUS_E_FAILURE;
 		}
 		pSession->dhcp_done = true;
-		pSession->dhcp_in_progress = false;
 
 		pMsg = qdf_mem_malloc(sizeof(tAniDHCPInd));
 		if (!pMsg) {
@@ -7845,17 +7820,17 @@ QDF_STATUS sme_set_ht2040_mode(mac_handle_t mac_handle, uint8_t sessionId,
 
 	switch (channel_type) {
 	case eHT_CHAN_HT20:
-		if (session->cb_mode == PHY_SINGLE_CHANNEL_CENTERED)
+		if (!session->cb_mode)
 			return QDF_STATUS_SUCCESS;
 		cb_mode = PHY_SINGLE_CHANNEL_CENTERED;
 		break;
 	case eHT_CHAN_HT40MINUS:
-		if (session->cb_mode != PHY_SINGLE_CHANNEL_CENTERED)
+		if (session->cb_mode)
 			return QDF_STATUS_SUCCESS;
 		cb_mode = PHY_DOUBLE_CHANNEL_HIGH_PRIMARY;
 		break;
 	case eHT_CHAN_HT40PLUS:
-		if (session->cb_mode != PHY_SINGLE_CHANNEL_CENTERED)
+		if (session->cb_mode)
 			return QDF_STATUS_SUCCESS;
 		cb_mode = PHY_DOUBLE_CHANNEL_LOW_PRIMARY;
 		break;
@@ -8693,7 +8668,7 @@ static QDF_STATUS sme_process_channel_change_resp(struct mac_context *mac,
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	struct csr_roam_info *roam_info;
 	eCsrRoamResult roamResult;
-	uint8_t vdev_id;
+	uint8_t session_id;
 
 	roam_info = qdf_mem_malloc(sizeof(*roam_info));
 	if (!roam_info)
@@ -8702,18 +8677,18 @@ static QDF_STATUS sme_process_channel_change_resp(struct mac_context *mac,
 	roam_info->channelChangeRespEvent =
 		(struct sSirChanChangeResponse *)msg_buf;
 
-	vdev_id = roam_info->channelChangeRespEvent->sessionId;
+	session_id = roam_info->channelChangeRespEvent->sessionId;
 
 	if (roam_info->channelChangeRespEvent->channelChangeStatus ==
 	    QDF_STATUS_SUCCESS) {
-		sme_debug("sapdfs: Received success for vdev %d", vdev_id);
+		sme_debug("sapdfs: Received success for vdev %d", session_id);
 		roamResult = eCSR_ROAM_RESULT_CHANNEL_CHANGE_SUCCESS;
 	} else {
-		sme_debug("sapdfs: Received failure for vdev %d", vdev_id);
+		sme_debug("sapdfs: Received failure for vdev %d", session_id);
 		roamResult = eCSR_ROAM_RESULT_CHANNEL_CHANGE_FAILURE;
 	}
 
-	csr_roam_call_callback(mac, vdev_id, roam_info,
+	csr_roam_call_callback(mac, session_id, roam_info,
 			       eCSR_ROAM_SET_CHANNEL_RSP, roamResult);
 
 	qdf_mem_free(roam_info);
@@ -14595,8 +14570,9 @@ QDF_STATUS sme_unpack_assoc_rsp(mac_handle_t mac_handle,
 
 	lim_strip_and_decode_eht_cap(rsp->connect_ies.assoc_rsp.ptr + ies_offset,
 				     rsp->connect_ies.assoc_rsp.len - ies_offset,
-				     &assoc_resp->eht_cap, assoc_resp->he_cap,
-				     rsp->freq, false);
+				     &assoc_resp->eht_cap,
+				     assoc_resp->he_cap,
+				     rsp->freq);
 	return status;
 }
 

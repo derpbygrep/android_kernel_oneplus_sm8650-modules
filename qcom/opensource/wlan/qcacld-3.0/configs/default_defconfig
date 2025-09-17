@@ -284,7 +284,7 @@ endif
 
 ifneq ($(DEVELOPER_DISABLE_BUILD_TIMESTAMP), y)
 ifneq ($(WLAN_DISABLE_BUILD_TAG), y)
-CONFIG_BUILD_TAG := n
+CONFIG_BUILD_TAG := y
 endif
 endif
 
@@ -422,9 +422,7 @@ endif
 	CONFIG_WLAN_SYSFS_RF_TEST_MODE := y
 endif
 CONFIG_WLAN_PDEV_VDEV_SEND_MULTI_PARAM := y
-ifeq ($(CONFIG_CNSS2_DEBUG), y)
-	CONFIG_WLAN_POWER_DEBUG := y
-endif
+CONFIG_WLAN_POWER_DEBUG := y
 #Enable Beacon Reception Stats
 CONFIG_FEATURE_BECN_STATS := y
 endif
@@ -810,6 +808,10 @@ ifneq ($(TARGET_BUILD_VARIANT),user)
 	CONFIG_FEATURE_PKTLOG := y
 	CONFIG_WLAN_DEBUG_CRASH_INJECT := y
 endif
+
+#ifdef OPLUS_FEATURE_WIFI_SWITCH_RECOVERY
+    CONFIG_WLAN_DEBUG_CRASH_INJECT := y
+#endif /* OPLUS_FEATURE_WIFI_SWITCH_RECOVERY */
 
 #Disable pktlog feature for lithium based target
 ifeq (y,$(filter y,$(CONFIG_LITHIUM) $(CONFIG_BERYLLIUM)))

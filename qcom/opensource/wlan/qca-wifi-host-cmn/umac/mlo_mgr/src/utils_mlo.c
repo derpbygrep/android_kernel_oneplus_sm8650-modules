@@ -801,11 +801,10 @@ uint8_t *util_get_successorfrag(uint8_t *currie, uint8_t *frame, qdf_size_t len)
 	return nextie;
 }
 
-static QDF_STATUS
-util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
-				      qdf_size_t linkinfo_len,
-				      struct mlo_partner_info *partner_info,
-				      uint8_t subtype)
+static
+QDF_STATUS util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
+						 qdf_size_t linkinfo_len,
+						 struct mlo_partner_info *partner_info)
 {
 	uint8_t linkid;
 	struct qdf_mac_addr macaddr;
@@ -820,8 +819,6 @@ util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
 	qdf_size_t defragpayload_len;
 	QDF_STATUS ret;
 	bool is_nstrlp_present = false;
-	uint8_t *sta_prof_currpos;
-	qdf_size_t sta_prof_remlen;
 
 	/* This helper function parses partner info from the per-STA profiles
 	 * present (if any) in the Link Info field in the payload of a Multi
@@ -925,8 +922,6 @@ util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
 
 		if (subelemid == WLAN_ML_LINFO_SUBELEMID_PERSTAPROFILE) {
 			is_macaddr_valid = false;
-			sta_prof_remlen = 0;
-			sta_prof_currpos = NULL;
 
 			ret = util_parse_bvmlie_perstaprofile_stactrl(linkinfo_currpos +
 								      sizeof(struct subelem_header),
@@ -939,9 +934,9 @@ util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
 								      NULL,
 								      &is_macaddr_valid,
 								      &macaddr,
-								      true,
-								      &sta_prof_currpos,
-								      &sta_prof_remlen,
+								      false,
+								      NULL,
+								      NULL,
 								      &nstr_info,
 								      &is_nstrlp_present);
 			if (QDF_IS_STATUS_ERROR(ret)) {
@@ -975,21 +970,6 @@ util_parse_partner_info_from_linkinfo(uint8_t *linkinfo,
 					     &macaddr,
 					     sizeof(partner_info->partner_link_info[partner_info->num_partner_links].link_addr));
 
-				if (subtype == WLAN_FC0_STYPE_ASSOC_RESP) {
-					if (sta_prof_remlen <
-					    (WLAN_CAPABILITYINFO_LEN + WLAN_STATUSCODE_LEN)) {
-						mlo_err_rl("Remaining length of STA profile %zu octets is less than length of Capability Info + length of Status Code %u",
-							   sta_prof_remlen,
-							   WLAN_CAPABILITYINFO_LEN +
-							   WLAN_STATUSCODE_LEN);
-						return QDF_STATUS_E_PROTO;
-						}
-						qdf_mem_copy(&partner_info->partner_link_info[partner_info->num_partner_links].link_status_code,
-							     sta_prof_currpos + WLAN_CAPABILITYINFO_LEN,
-							     (WLAN_STATUSCODE_LEN));
-						mlo_debug("partner link status code %d",
-							  partner_info->partner_link_info[partner_info->num_partner_links].link_status_code);
-				}
 				partner_info->num_partner_links++;
 			} else {
 				mlo_warn_rl("MAC address not found in STA Info field of per-STA profile with link ID %u",
@@ -1478,7 +1458,7 @@ QDF_STATUS util_validate_reportingsta_ie(const uint8_t *reportingsta_ie,
 
 	if ((reportingsta_ie[ID_POS] == WLAN_ELEMID_VENDOR) &&
 	    (reportingsta_ie_size < (PAYLOAD_START_POS + OUI_LEN))) {
-		mlo_err_rl("Total length %zu of element for reporting STA is smaller than minimum required of %u to access vendor EID",
+		mlo_err_rl("Total length %zu of element for reporting STA is smaller than minimum required to access vendor EID %u",
 			   reportingsta_ie_size, PAYLOAD_START_POS + OUI_LEN);
 		return QDF_STATUS_E_PROTO;
 	}
@@ -3838,8 +3818,7 @@ util_get_bvmlie_ext_mld_cap_op_info(uint8_t *mlie_seq,
 QDF_STATUS
 util_get_bvmlie_persta_partner_info(uint8_t *mlieseq,
 				    qdf_size_t mlieseqlen,
-				    struct mlo_partner_info *partner_info,
-				    uint8_t subtype)
+				    struct mlo_partner_info *partner_info)
 {
 	struct wlan_ie_multilink *mlie_fixed;
 	uint16_t mlcontrol;
@@ -3991,8 +3970,7 @@ util_get_bvmlie_persta_partner_info(uint8_t *mlieseq,
 
 	ret = util_parse_partner_info_from_linkinfo(linkinfo,
 						    linkinfo_len,
-						    &pinfo,
-						    subtype);
+						    &pinfo);
 
 	if (QDF_IS_STATUS_ERROR(ret)) {
 		qdf_mem_free(mlieseqpayload_copy);

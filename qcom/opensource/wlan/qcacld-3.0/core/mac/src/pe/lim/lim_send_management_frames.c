@@ -62,8 +62,6 @@
 #include "wlan_mlo_mgr_sta.h"
 #include "wlan_t2lm_api.h"
 #include "wlan_connectivity_logging.h"
-#include "wlan_mlo_mgr_ap.h"
-#include "wlan_scan_api.h"
 
 /**
  *
@@ -188,7 +186,7 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 	uint8_t *frame;
 	void *packet;
 	QDF_STATUS qdf_status;
-	struct pe_session *pesession = NULL;
+	struct pe_session *pesession;
 	uint8_t sessionid;
 	const uint8_t *p2pie = NULL;
 	uint8_t txflag = 0;
@@ -204,7 +202,6 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 	uint8_t *eht_cap_ie = NULL, eht_cap_ie_len = 0;
 	bool is_band_2g;
 	uint16_t mlo_ie_len = 0;
-	tSirMacAddr bcast_mac = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 	if (additional_ielen)
 		addn_ielen = *additional_ielen;
@@ -242,16 +239,6 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 		pe_err("memory alloc failed for probe request");
 		return QDF_STATUS_E_NOMEM;
 	}
-
-	/*
-	 * Some IOT APs doesn't respond to unicast probe requests,
-	 * however those APs respond to broadcast probe requests.
-	 * Therefore for hidden ssid connections, after 3 unicast probe
-	 * requests, try the pending probes with broadcast mac.
-	 */
-	if (pesession && !WLAN_REG_IS_6GHZ_CHAN_FREQ(pesession->curr_op_freq) &&
-	    pesession->join_probe_cnt > 2)
-		sir_copy_mac_addr(bssid, bcast_mac);
 
 	/* The scheme here is to fill out a 'tDot11fProbeRequest' structure */
 	/* and then hand it off to 'dot11f_pack_probe_request' (for */
@@ -352,12 +339,9 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 				    &pr->he_6ghz_band_cap);
 
 	if (IS_DOT11_MODE_EHT(dot11mode) && pesession &&
-	    pesession->lim_join_req &&
-	    !qdf_is_macaddr_broadcast((struct qdf_mac_addr *)bssid)) {
-		lim_update_session_eht_capable(pesession, true);
-
-		if (pesession->lim_join_req->bssDescription.is_ml_ap)
-			mlo_ie_len = lim_send_probe_req_frame_mlo(mac_ctx, pesession);
+			pesession->lim_join_req) {
+		lim_update_session_eht_capable(mac_ctx, pesession);
+		mlo_ie_len = lim_send_probe_req_frame_mlo(mac_ctx, pesession);
 	}
 
 	populate_dot11f_eht_caps(mac_ctx, pesession, &pr->eht_cap);
@@ -2157,42 +2141,6 @@ lim_send_delts_req_action_frame(struct mac_context *mac,
 
 } /* End lim_send_delts_req_action_frame. */
 
-static void
-wlan_get_rssi_by_bssid(struct wlan_objmgr_pdev *pdev, uint8_t *mac,
-		       int32_t *rssi)
-{
-	struct scan_filter *scan_filter;
-	qdf_list_t *list = NULL;
-	struct scan_cache_node *first_node = NULL;
-
-	scan_filter = qdf_mem_malloc(sizeof(*scan_filter));
-	if (!scan_filter) {
-		pe_err("Unable to allocate memory");
-		return;
-	}
-
-	scan_filter->num_of_bssid = 1;
-	qdf_mem_copy(scan_filter->bssid_list[0].bytes,
-		     mac, sizeof(struct qdf_mac_addr));
-
-	scan_filter->ignore_auth_enc_type = true;
-	list = wlan_scan_get_result(pdev, scan_filter);
-	qdf_mem_free(scan_filter);
-
-	if (!list || (list && !qdf_list_size(list))) {
-		pe_debug("scan list empty");
-		goto exit;
-	}
-
-	qdf_list_peek_front(list, (qdf_list_node_t **)&first_node);
-	if (first_node && first_node->entry)
-		*rssi = first_node->entry->rssi_raw;
-
-exit:
-	if (list)
-		wlan_scan_purge_results(list);
-}
-
 #define SAE_AUTH_SEQ_NUM_OFFSET         2
 #define SAE_AUTH_STATUS_CODE_OFFSET     4
 #define SAE_AUTH_MESSAGE_TYPE_OFFSET    6
@@ -2222,12 +2170,6 @@ static void wlan_send_tx_complete_event(struct mac_context *mac, qdf_nbuf_t buf,
 	enum qdf_dp_tx_rx_status qdf_tx_complete;
 	uint8_t *frm_body;
 	uint16_t reason_code = 0;
-	int32_t rssi = 0;
-
-	if (!params) {
-		pe_err("MGMT param not present for the event: %d", tag);
-		return;
-	}
 
 	pe_session = pe_find_session_by_vdev_id(mac, params->vdev_id);
 	if (pe_session && pe_session->opmode == QDF_STA_MODE) {
@@ -2258,17 +2200,10 @@ static void wlan_send_tx_complete_event(struct mac_context *mac, qdf_nbuf_t buf,
 			if (algo == eSIR_AUTH_TYPE_SAE)
 				type = seq;
 
-			if (params->peer_rssi)
-				rssi = params->peer_rssi;
-			else
-				wlan_get_rssi_by_bssid(mac->pdev,
-						       &mac_hdr->i_addr3[0],
-						       &rssi);
-
 			wlan_connectivity_mgmt_event(
 					mac->psoc,
 					mac_hdr, params->vdev_id, status,
-					qdf_tx_complete, rssi,
+					qdf_tx_complete, mac->lim.bss_rssi,
 					algo, type, seq, 0, WLAN_AUTH_REQ);
 			lim_cp_stats_cstats_log_auth_evt(pe_session,
 							 CSTATS_DIR_TX, algo,
@@ -2282,7 +2217,7 @@ static void wlan_send_tx_complete_event(struct mac_context *mac, qdf_nbuf_t buf,
 		wlan_connectivity_mgmt_event(
 					mac->psoc,
 					mac_hdr, params->vdev_id, reason_code,
-					qdf_tx_complete, rssi,
+					qdf_tx_complete, mac->lim.bss_rssi,
 					0, 0, 0, 0, tag);
 	}
 }
@@ -2464,8 +2399,8 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	uint8_t *eht_cap_ie = NULL, eht_cap_ie_len = 0;
 	bool bss_mfp_capable, frag_ie_present = false;
 	int8_t peer_rssi = 0;
-	bool is_band_2g, is_ml_ap;
-	uint16_t mlo_ie_len = 0, fils_hlp_ie_len = 0;
+	bool is_band_2g;
+	uint16_t mlo_ie_len, fils_hlp_ie_len = 0;
 	uint8_t *fils_hlp_ie = NULL;
 	struct cm_roam_values_copy mdie_cfg = {0};
 
@@ -2704,6 +2639,16 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	if (add_ie_len && lim_is_session_eht_capable(pe_session)) {
 		populate_dot11f_eht_caps(mac_ctx, pe_session, &frm->eht_cap);
 		lim_strip_mlo_ie(mac_ctx, add_ie, &add_ie_len);
+	}
+
+	mlo_ie_len = lim_fill_assoc_req_mlo_ie(mac_ctx, pe_session, frm);
+
+	/**
+	 * In case of ML connection, if ML IE length is 0 then return failure.
+	 */
+	if (mlo_is_mld_sta(pe_session->vdev) && !mlo_ie_len) {
+		pe_err("Failed to add ML IE for vdev:%d", pe_session->vdev_id);
+		goto end;
 	}
 
 	if (pe_session->is11Rconnection) {
@@ -2956,19 +2901,6 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 					      &adaptive_11r_ie_len);
 	if (QDF_IS_STATUS_ERROR(qdf_status)) {
 		pe_err("Failed to fill adaptive 11r IE");
-		goto end;
-	}
-
-	is_ml_ap = !!pe_session->lim_join_req->bssDescription.is_ml_ap;
-	if (is_ml_ap)
-		mlo_ie_len = lim_fill_assoc_req_mlo_ie(mac_ctx, pe_session,
-						       frm);
-
-	/**
-	 * In case of ML connection, if ML IE length is 0 then return failure.
-	 */
-	if (is_ml_ap && mlo_is_mld_sta(pe_session->vdev) && !mlo_ie_len) {
-		pe_err("Failed to add ML IE for vdev:%d", pe_session->vdev_id);
 		goto end;
 	}
 
@@ -4465,7 +4397,6 @@ lim_send_disassoc_mgmt_frame(struct mac_context *mac,
 		lim_diag_mgmt_tx_event_report(mac, pMacHdr,
 					      pe_session,
 					      QDF_STATUS_SUCCESS, QDF_STATUS_SUCCESS);
-
 		wlan_connectivity_mgmt_event(mac->psoc,
 					     (struct wlan_frame_hdr *)pMacHdr,
 					     pe_session->vdev_id, nReason,

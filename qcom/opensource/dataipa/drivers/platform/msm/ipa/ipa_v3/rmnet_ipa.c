@@ -160,6 +160,7 @@ struct ipa3_wwan_private {
 
 struct ipa3_netmgr_clock_vote {
 	struct mutex mutex;
+	//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 	atomic_t cnt;
 };
 
@@ -1494,9 +1495,6 @@ static netdev_tx_t ipa3_wwan_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 send:
-	if (atomic_read(&ipa3_ctx->is_suspend_mode_enabled))
-		IPAWANERR("User %s sent data in suspend mode.\n", current->comm);
-
 	/* IPA_PM checking start */
 	/* activate the modem pm for clock scaling */
 	ipa_pm_activate(rmnet_ipa3_ctx->q6_pm_hdl);
@@ -3010,6 +3008,7 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, void __use
 			if (ext_ioctl_data.u.data) {
 				/* Request to enable LPM */
 				IPAWANDBG("ioctl: unvote IPA clock\n");
+				//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 				if (atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt)) {
 					atomic_dec(&rmnet_ipa3_ctx->clock_vote.cnt);
 					IPA_ACTIVE_CLIENTS_DEC_SPECIAL("NETMGR");
@@ -3017,6 +3016,7 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, void __use
 			} else {
 				/* Request to disable LPM */
 				IPAWANDBG("ioctl: vote IPA clock\n");
+				//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 				if ((atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt) + 1)
 					<= IPA_APP_VOTE_MAX) {
 					IPA_ACTIVE_CLIENTS_INC_SPECIAL("NETMGR");
@@ -3962,12 +3962,16 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 	}
 
 	switch (code) {
+#if IS_ENABLED(CONFIG_DEEPSLEEP)
+	case SUBSYS_BEFORE_DS_ENTRY:
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 	case QCOM_SSR_BEFORE_SHUTDOWN:
 #else
 	case SUBSYS_BEFORE_SHUTDOWN:
 #endif
 		IPAWANINFO("IPA received MPSS BEFORE_SHUTDOWN\n");
+		//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 		/*
 		 * Clear the proxy vote if any. This happens in scenarios
 		 * where Modem restarts before QMI Handshake is complete
@@ -3996,6 +4000,17 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 		ipa3_odl_pipe_cleanup_from_ssr();
 		IPAWANINFO("IPA BEFORE_SHUTDOWN handling is complete\n");
 		break;
+#if IS_ENABLED(CONFIG_DEEPSLEEP)
+	case SUBSYS_AFTER_DS_ENTRY:
+		IPAWANINFO("IPA Received AFTER DEEPSLEEP ENTRY\n");
+		if (atomic_read(&rmnet_ipa3_ctx->is_ssr) &&
+				ipa3_ctx_get_type(IPA_HW_TYPE) < IPA_HW_v4_0)
+			ipa3_q6_post_shutdown_cleanup();
+
+		IPAWANINFO("AFTER DEEPSLEEP ENTRY handling is complete\n");
+		break;
+#endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 	case QCOM_SSR_AFTER_SHUTDOWN:
 #else
@@ -4020,6 +4035,7 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 
 		if (ipa3_ctx_get_flag(IPA_ENDP_DELAY_WA_EN))
 			ipa3_client_prod_post_shutdown_cleanup();
+		//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 		while (atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt) > 0) {
 			IPAWANDBG("ioctl: unvoting pending IPA clock\n");
 			atomic_dec(&rmnet_ipa3_ctx->clock_vote.cnt);
@@ -4027,6 +4043,21 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 		}
 		IPAWANINFO("IPA AFTER_SHUTDOWN handling is complete\n");
 		break;
+#if IS_ENABLED(CONFIG_DEEPSLEEP)
+	case SUBSYS_BEFORE_DS_EXIT:
+		IPAWANINFO("IPA received BEFORE DEEPSLEEP EXIT\n");
+		if (atomic_read(&rmnet_ipa3_ctx->is_ssr)) {
+			/* clean up cached QMI msg/handlers */
+			ipa3_qmi_service_exit();
+			ipa3_q6_pre_powerup_cleanup();
+		}
+		/* hold a proxy vote for the modem. */
+		ipa3_proxy_clk_vote(atomic_read(&rmnet_ipa3_ctx->is_ssr));
+		ipa3_reset_freeze_vote();
+		IPAWANINFO("BEFORE DEEPSLEEP EXIT handling is complete\n");
+		break;
+#endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 	case QCOM_SSR_BEFORE_POWERUP:
 #else
@@ -4043,6 +4074,9 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 		ipa3_reset_freeze_vote();
 		IPAWANINFO("IPA BEFORE_POWERUP handling is complete\n");
 		break;
+#if IS_ENABLED(CONFIG_DEEPSLEEP)
+	case SUBSYS_AFTER_DS_EXIT:
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 	case QCOM_SSR_AFTER_POWERUP:
 #else
@@ -6678,6 +6712,7 @@ int ipa3_wwan_init(void)
 
 	atomic_set(&rmnet_ipa3_ctx->is_initialized, 0);
 	atomic_set(&rmnet_ipa3_ctx->is_ssr, 0);
+	//Maiwentian.Network.RF porting qcom patch CR:3925161,3941555, 3943399
 	atomic_set(&rmnet_ipa3_ctx->clock_vote.cnt, 0);
 
 	mutex_init(&rmnet_ipa3_ctx->pipe_handle_guard);

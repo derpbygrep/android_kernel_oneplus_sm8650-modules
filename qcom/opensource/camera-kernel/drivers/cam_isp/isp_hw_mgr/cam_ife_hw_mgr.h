@@ -91,20 +91,6 @@ struct cam_ife_hw_mgr_debug {
 };
 
 /**
- * struct cam_cmd_buf_desc_addr_len
- *
- * brief:                       structure to store cpu addr and size of
- *                              reg dump descriptors
- * @cpu_addr:                   cpu addr of buffer
- * @size:                       size of the buffer
- */
-
-struct cam_cmd_buf_desc_addr_len {
-	uintptr_t cpu_addr;
-	size_t    buf_size;
-};
-
-/**
  * struct cam_ife_hw_mgr_ctx_pf_info - pf buf info
  *
  * @out_port_id: Out port id
@@ -218,7 +204,6 @@ struct cam_ife_hw_mgr_ctx_scratch_buf_info {
  *                       for the cache type
  * @rdi_pd_context:      Flag to specify the context has
  *                       only rdi and PD resource without PIX port.
- * @skip_reg_dump_buf_put: Set if put_cpu_buf for reg dump buf is already called
  *
  */
 struct cam_ife_hw_mgr_ctx_flags {
@@ -241,7 +226,6 @@ struct cam_ife_hw_mgr_ctx_flags {
 	bool   rdi_lcr_en;
 	bool   sys_cache_usage[CAM_LLCC_MAX];
 	bool   rdi_pd_context;
-	bool   skip_reg_dump_buf_put;
 };
 
 /**
@@ -292,6 +276,8 @@ struct cam_isp_comp_record_query {
  * @ctx_index:              acquired context id.
  * @left_hw_idx:            hw index for master core [left]
  * @right_hw_idx:           hw index for slave core [right]
+ * @sfe_left_hw_idx:        hw index for sfe master core [left]
+ * @sfe_right_hw_idx:       hw index for sfe slave core [right]
  * @hw_mgr:                 IFE hw mgr which owns this context
  * @res_list_csid:          CSID resource list
  * @res_list_ife_src:       IFE input resource list
@@ -327,8 +313,6 @@ struct cam_isp_comp_record_query {
  * @config_done_complete    indicator for configuration complete
  * @reg_dump_buf_desc:      cmd buffer descriptors for reg dump
  * @num_reg_dump_buf:       Count of descriptors in reg_dump_buf_desc
- * @reg_dump_cmd_buf_addr_len	store cpu addr and size of
- *                          reg dump descriptors for flush/error cases
  * @applied_req_id:         Last request id to be applied
  * @ctx_type                Type of IFE ctx [CUSTOM/SFE etc.]
  * @ctx_config              ife ctx config  [bit field]
@@ -360,6 +344,10 @@ struct cam_ife_hw_mgr_ctx {
 	uint32_t                                  ctx_index;
 	uint32_t                                  left_hw_idx;
 	uint32_t                                  right_hw_idx;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	uint32_t                                  sfe_left_hw_idx;
+	uint32_t                                  sfe_right_hw_idx;
+#endif
 	struct cam_ife_hw_mgr                    *hw_mgr;
 
 	struct cam_isp_hw_mgr_res                  res_list_ife_in;
@@ -397,8 +385,6 @@ struct cam_ife_hw_mgr_ctx {
 	struct cam_cmd_buf_desc                    reg_dump_buf_desc[
 						CAM_REG_DUMP_MAX_BUF_ENTRIES];
 	uint32_t                                   num_reg_dump_buf;
-	struct cam_cmd_buf_desc_addr_len           reg_dump_cmd_buf_addr_len[
-						CAM_REG_DUMP_MAX_BUF_ENTRIES];
 	uint64_t                                   applied_req_id;
 	enum cam_ife_ctx_master_type               ctx_type;
 	uint32_t                                   ctx_config;
@@ -421,6 +407,14 @@ struct cam_ife_hw_mgr_ctx {
 	struct timespec64                          cdm_done_ts;
 	bool                                       is_hw_ctx_acq;
 	uint32_t                                   acq_hw_ctxt_src_dst_map[CAM_ISP_MULTI_CTXT_MAX];
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+    uint64_t                                   rdi0_sof_timestamp;
+    uint64_t                                   rdi0_eof_timestamp;
+    uint64_t                                   rdi1_sof_timestamp;
+    uint64_t                                   active_frame_duration;
+    uint64_t                                   sof_to_sof;
+    uint32_t                                   error_cnt_after_recovery;
+#endif
 };
 
 /**

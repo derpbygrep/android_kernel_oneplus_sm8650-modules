@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
  *
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -132,6 +132,7 @@ static int ipa_get_generic_stats(unsigned long arg)
 	int i, j;
 	struct ipa_lnx_generic_stats *generic_stats;
 	struct ipa_drop_stats_all *out;
+	/*CVE-2024-21464 (QC-CR#3445828) :all platforms that need the CR should use the uint64_t(QC case:07596359)*/
 	uint64_t alloc_size;
 	int reg_idx;
 	struct ipa_uc_holb_client_info *holb_client;
@@ -1510,7 +1511,6 @@ static int ipa_stats_get_alloc_info(unsigned long arg)
 
 	if (copy_from_user(&ipa_lnx_agent_ctx, u64_to_user_ptr((u64) arg),
 		sizeof(struct ipa_lnx_stats_tlpd_ctx))) {
-		memset(&ipa_lnx_agent_ctx, 0, sizeof(ipa_lnx_agent_ctx));
 		IPA_STATS_ERR("copy from user failed");
 		return -EFAULT;
 	}
@@ -1930,7 +1930,6 @@ int ipa_tlpd_stats_init(void)
 		return -1;
 	}
 	memset(&poll_pack_and_cred_info, 0, sizeof(poll_pack_and_cred_info));
-	memset(&ipa_lnx_agent_ctx, 0, sizeof(ipa_lnx_agent_ctx));
 	IPA_STATS_ERR("IPA_LNX_STATS_IOCTL init success\n");
 
 	return 0;

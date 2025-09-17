@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  *
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/mutex.h>
@@ -1145,7 +1145,7 @@ static int ipa3_usb_request_xdci_channel(
 
 	memset(&chan_params, 0, sizeof(struct ipa_request_gsi_channel_params));
 	chan_params.ipa_ep_cfg.mode.mode = IPA_BASIC;
-	if (params->dir == CHAN_DIR_TO_GSI)
+	if (params->dir == GSI_CHAN_DIR_TO_GSI)
 		chan_params.client = IPA_CLIENT_USB_PROD;
 	else
 		chan_params.client = (params->teth_prot == IPA_USB_DIAG) ?
@@ -1153,7 +1153,7 @@ static int ipa3_usb_request_xdci_channel(
 	switch (params->teth_prot) {
 	case IPA_USB_RNDIS:
 		chan_params.priv = rndis_ptr->private;
-		if (params->dir == CHAN_DIR_FROM_GSI)
+		if (params->dir == GSI_CHAN_DIR_FROM_GSI)
 			chan_params.notify = rndis_ptr->ipa_tx_notify;
 		else
 			chan_params.notify = rndis_ptr->ipa_rx_notify;
@@ -1161,7 +1161,7 @@ static int ipa3_usb_request_xdci_channel(
 		break;
 	case IPA_USB_ECM:
 		chan_params.priv = ecm_ptr->private;
-		if (params->dir == CHAN_DIR_FROM_GSI)
+		if (params->dir == GSI_CHAN_DIR_FROM_GSI)
 			chan_params.notify = ecm_ptr->ecm_ipa_tx_dp_notify;
 		else
 			chan_params.notify = ecm_ptr->ecm_ipa_rx_dp_notify;
@@ -1243,7 +1243,7 @@ static int ipa3_usb_request_xdci_channel(
 	chan_params.evt_scratch.xdci.gevntcount_hi_addr =
 		params->gevntcount_hi_addr;
 	chan_params.chan_params.prot = GSI_CHAN_PROT_XDCI;
-	chan_params.chan_params.dir = params->dir;
+	chan_params.chan_params.dir = (enum gsi_chan_dir)(params->dir);
 	/* chan_id is set in ipa3_request_gsi_channel() */
 	chan_params.chan_params.re_size = GSI_CHAN_RE_SIZE_16B;
 	chan_params.chan_params.ring_len = params->xfer_ring_len;
@@ -1256,7 +1256,7 @@ static int ipa3_usb_request_xdci_channel(
 		chan_params.chan_params.use_db_eng = GSI_CHAN_DB_MODE;
 	chan_params.chan_params.db_in_bytes = 1;
 	chan_params.chan_params.max_prefetch = GSI_ONE_PREFETCH_SEG;
-	if (params->dir == CHAN_DIR_FROM_GSI)
+	if (params->dir == GSI_CHAN_DIR_FROM_GSI)
 		chan_params.chan_params.low_weight =
 			IPA_USB_DL_CHAN_LOW_WEIGHT;
 	else
@@ -2745,9 +2745,12 @@ int ipa3_usb_init(void)
 
 	ipa_usb_debugfs_init();
 
-	res = ipa3_usb_register_ready_cb();
-	if (res < 0)
-		goto ipa_usb_workqueue_fail;
+	res = ipa_register_ipa_ready_cb(ipa_ready_callback, (void *)&usb_ops);
+	if (res < 0) {
+		pr_err("failed to register USB ops CB\n");
+			goto ipa_usb_workqueue_fail;
+	}
+	pr_err("ILIA: ipa_ready_callback registered\n");
 
 	pr_info("exit: IPA_USB init success!\n");
 
@@ -2776,16 +2779,4 @@ void ipa3_usb_exit(void)
 #endif
 	ipa_usb_debugfs_remove();
 	kfree(ipa3_usb_ctx);
-}
-
-int ipa3_usb_register_ready_cb(void)
-{
-	int res;
-
-	res = ipa_register_ipa_ready_cb(ipa_ready_callback, (void *)&usb_ops);
-	if (res < 0)
-		IPA_USB_DBG("Failed to register USB ops CB\n");
-	else
-		IPA_USB_DBG("ipa_ready_callback registered\n");
-	return res;
 }

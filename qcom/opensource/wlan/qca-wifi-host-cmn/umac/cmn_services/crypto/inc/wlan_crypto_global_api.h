@@ -323,6 +323,10 @@ bool wlan_crypto_is_mmie_valid(struct wlan_objmgr_vdev *vdev,
 					uint8_t *frm,
 					uint8_t *efrm);
 
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+int32_t wlan_crypto_rsn_suite_to_keymgmt(const uint8_t *sel);
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
+
 /**
  * wlan_crypto_wpaie_check() - called by mlme to check the wpaie
  * @crypto_params: crypto params
@@ -879,14 +883,13 @@ int8_t wlan_crypto_get_default_key_idx(struct wlan_objmgr_vdev *vdev,
 /**
  * wlan_crypto_get_cipher() - Get the cipher type for the vdev
  * @vdev: vdev object
- * @peer_mac: MAC address of crypto key entity
  * @pairwise: denotes if the request is for pairwise cipher or not
  * @key_index: Index of the key whose cipher type has to be returned
  *
  * Return: enum wlan_crypto_cipher_type
  */
 enum wlan_crypto_cipher_type
-wlan_crypto_get_cipher(struct wlan_objmgr_vdev *vdev, const uint8_t *peer_mac,
+wlan_crypto_get_cipher(struct wlan_objmgr_vdev *vdev,
 		       bool pairwise, uint8_t key_index);
 
 /**
@@ -945,14 +948,13 @@ wlan_crypto_save_ml_sta_key(struct wlan_objmgr_psoc *psoc,
 /**
  * wlan_crypto_save_key() - Allocate memory for storing key
  * @vdev: vdev object
- * @peer_mac: MAC address of crypto key entity
  * @key_index: the index of the key that needs to be allocated
  * @crypto_key: Pointer to crypto key
  *
  * Return: QDF_STATUS
  */
 QDF_STATUS wlan_crypto_save_key(struct wlan_objmgr_vdev *vdev,
-				const uint8_t *peer_mac, uint8_t key_index,
+				uint8_t key_index,
 				struct wlan_crypto_key *crypto_key);
 
 /**
@@ -971,13 +973,11 @@ struct wlan_crypto_key *wlan_crypto_get_ml_sta_link_key(
 /**
  * wlan_crypto_get_key() - Get the stored key information
  * @vdev: vdev object
- * @peer_mac: MAC address of crypto key entity
  * @key_index: the index of the key that needs to be retrieved
  *
  * Return: Key material
  */
 struct wlan_crypto_key *wlan_crypto_get_key(struct wlan_objmgr_vdev *vdev,
-					    const uint8_t *peer_mac,
 					    uint8_t key_index);
 
 /**
@@ -1031,16 +1031,14 @@ static inline void wlan_crypto_update_set_key_peer(
 }
 
 static inline QDF_STATUS
-wlan_crypto_save_key(struct wlan_objmgr_vdev *vdev,
-		     const uint8_t *peer_mac, uint8_t key_index,
+wlan_crypto_save_key(struct wlan_objmgr_vdev *vdev, uint8_t key_index,
 		     struct wlan_crypto_key *crypto_key)
 {
 	return QDF_STATUS_SUCCESS;
 }
 
 static inline struct wlan_crypto_key *
-wlan_crypto_get_key(struct wlan_objmgr_vdev *vdev,
-		    const uint8_t *peer_mac, uint8_t key_index)
+wlan_crypto_get_key(struct wlan_objmgr_vdev *vdev, uint8_t key_index)
 {
 	return NULL;
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -465,6 +465,35 @@ int wlan_hdd_qmi_put_suspend(void)
 }
 #endif /* end if of WLAN_FEATURE_WMI_SEND_RECV_QMI */
 
+/*
+ * wlan_hdd_is_mlo_connection() - Check if connection is legacy or mlo
+ * @link_info: Link info pointer in HDD adapter
+ *
+ * Return: True if MLO connection, else False
+ */
+static bool wlan_hdd_is_mlo_connection(struct wlan_hdd_link_info *link_info)
+{
+	struct wlan_objmgr_vdev *vdev;
+	bool ret = false;
+
+	if (!link_info) {
+		hdd_err("Invalid link_info");
+		return ret;
+	}
+
+	vdev = hdd_objmgr_get_vdev_by_user(link_info, WLAN_OSIF_STATS_ID);
+	if (!vdev) {
+		hdd_err("invalid vdev");
+		return ret;
+	}
+
+	if (wlan_vdev_mlme_is_mlo_vdev(vdev))
+		ret = true;
+
+	hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_STATS_ID);
+	return ret;
+}
+
 static struct wlan_hdd_link_info *
 hdd_get_link_info_by_bssid(struct hdd_context *hdd_ctx, const uint8_t *bssid)
 {
@@ -540,6 +569,40 @@ wlan_hdd_get_bss_peer_mld_mac(struct wlan_hdd_link_info *link_info,
 	hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_STATS_ID);
 	return status;
 }
+
+#ifdef WLAN_FEATURE_11BE_MLO_ADV_FEATURE
+static bool
+wlan_hdd_is_link_switch_in_progress(struct wlan_hdd_link_info *link_info)
+{
+	struct wlan_objmgr_vdev *vdev;
+	bool ret = false;
+
+	if (!link_info) {
+		hdd_err_rl("Invalid link info");
+		return ret;
+	}
+
+	if (!wlan_hdd_is_mlo_connection(link_info))
+		return ret;
+
+	vdev = hdd_objmgr_get_vdev_by_user(link_info, WLAN_OSIF_STATS_ID);
+	if (!vdev) {
+		hdd_err("invalid vdev");
+		return ret;
+	}
+
+	ret = mlo_mgr_is_link_switch_in_progress(vdev);
+
+	hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_STATS_ID);
+	return ret;
+}
+#else
+static inline bool
+wlan_hdd_is_link_switch_in_progress(struct wlan_hdd_link_info *link_info)
+{
+	return false;
+}
+#endif /* WLAN_FEATURE_11BE_MLO_ADV_FEATURE */
 
 /**
  * wlan_hdd_copy_sinfo_to_link_info() - Copy sinfo to link_info
@@ -701,6 +764,12 @@ wlan_hdd_get_bss_peer_mld_mac(struct wlan_hdd_link_info *link_info,
 			      struct qdf_mac_addr *mld_mac)
 {
 	return QDF_STATUS_E_FAILURE;
+}
+
+static inline bool
+wlan_hdd_is_link_switch_in_progress(struct wlan_hdd_link_info *link_info)
+{
+	return false;
 }
 
 static inline void
@@ -1240,33 +1309,32 @@ bool hdd_get_interface_info(struct wlan_hdd_link_info *link_info,
 	     (QDF_P2P_CLIENT_MODE == adapter->device_mode) ||
 	     (QDF_P2P_DEVICE_MODE == adapter->device_mode))) {
 		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(link_info);
-
-		if (QDF_STA_MODE == adapter->device_mode &&
-		    link_info->vdev_id == WLAN_INVALID_VDEV_ID) {
-			info->state = WIFI_ASSOCIATED;
-		} else if (hdd_cm_is_disconnected(link_info)) {
+		if (hdd_cm_is_disconnected(link_info))
 			info->state = WIFI_DISCONNECTED;
-		} else if (hdd_cm_is_connecting(link_info)) {
+
+		if (hdd_cm_is_connecting(link_info)) {
 			hdd_debug("Session ID %d, Connection is in progress",
 				  link_info->vdev_id);
 			info->state = WIFI_ASSOCIATING;
-		} else if (hdd_cm_is_vdev_associated(link_info)) {
-			if (!sta_ctx->conn_info.is_authenticated) {
-				hdd_err("client " QDF_MAC_ADDR_FMT " is in the middle of WPS/EAPOL exchange.",
-					QDF_MAC_ADDR_REF(mac->bytes));
-				info->state = WIFI_AUTHENTICATING;
-			} else {
-				info->state = WIFI_ASSOCIATED;
-			}
 		}
-
-		if (info->state == WIFI_ASSOCIATED) {
+		if (hdd_cm_is_vdev_associated(link_info) &&
+		    !sta_ctx->conn_info.is_authenticated) {
+			hdd_err("client " QDF_MAC_ADDR_FMT
+				" is in the middle of WPS/EAPOL exchange.",
+				QDF_MAC_ADDR_REF(mac->bytes));
+			info->state = WIFI_AUTHENTICATING;
+		}
+		if (hdd_cm_is_vdev_associated(link_info) ||
+		    link_info->vdev_id == WLAN_INVALID_VDEV_ID) {
+			info->state = WIFI_ASSOCIATED;
 			qdf_copy_macaddr(&info->bssid,
 					 &sta_ctx->conn_info.bssid);
 			qdf_mem_copy(info->ssid,
 				     sta_ctx->conn_info.ssid.SSID.ssId,
 				     sta_ctx->conn_info.ssid.SSID.length);
-			/* NULL Terminate the string */
+			/*
+			 * NULL Terminate the string
+			 */
 			info->ssid[sta_ctx->conn_info.ssid.SSID.length] = 0;
 		}
 	}
@@ -3517,8 +3585,9 @@ int wlan_hdd_ll_stats_get(struct wlan_hdd_link_info *link_info,
 	get_req.paramIdMask = req_mask;
 	get_req.staId = link_info->vdev_id;
 
+	rtnl_lock();
 	errno = wlan_hdd_send_ll_stats_req(link_info, &get_req);
-
+	rtnl_unlock();
 	if (errno)
 		hdd_err("Send LL stats req failed, id:%u, mask:%d, session:%d",
 			req_id, req_mask, link_info->vdev_id);
@@ -7261,17 +7330,15 @@ hdd_wlan_fill_per_chain_rssi_stats(struct station_info *sinfo,
 
 	sinfo->signal_avg = WLAN_HDD_TGT_NOISE_FLOOR_DBM;
 	for (i = 0; i < NUM_CHAINS_MAX; i++) {
-		if (link_info->hdd_stats.per_chain_rssi_stats.rssi[i] != 0) {
-			sinfo->chain_signal_avg[i] =
-			link_info->hdd_stats.per_chain_rssi_stats.rssi[i];
-			sinfo->chains |= 1 << i;
-			if (sinfo->chain_signal_avg[i] > sinfo->signal_avg)
-				sinfo->signal_avg = sinfo->chain_signal_avg[i];
+		sinfo->chain_signal_avg[i] =
+			   link_info->hdd_stats.per_chain_rssi_stats.rssi[i];
+		sinfo->chains |= 1 << i;
+		if (sinfo->chain_signal_avg[i] > sinfo->signal_avg &&
+		    sinfo->chain_signal_avg[i] != 0)
+			sinfo->signal_avg = sinfo->chain_signal_avg[i];
 
-			hdd_debug("RSSI for chain %d, vdev_id %d is %d",
-				  i, link_info->vdev_id,
-				  sinfo->chain_signal_avg[i]);
-		}
+		hdd_debug("RSSI for chain %d, vdev_id %d is %d",
+			  i, link_info->vdev_id, sinfo->chain_signal_avg[i]);
 
 		if (!rssi_stats_valid && sinfo->chain_signal_avg[i])
 			rssi_stats_valid = true;
@@ -7424,17 +7491,40 @@ static void wlan_hdd_update_rssi(struct wlan_hdd_link_info *link_info,
 	struct hdd_station_ctx *sta_ctx;
 	int8_t snr;
 	mac_handle_t mac_handle;
-
 	mac_handle = hdd_adapter_get_mac_handle(link_info->adapter);
 	if (!mac_handle) {
 		hdd_err("mac ctx NULL");
 		return;
 	}
-
 	sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(link_info);
 	link_info->rssi = link_info->hdd_stats.summary_stat.rssi;
 	link_info->snr = link_info->hdd_stats.summary_stat.snr;
 	snr = link_info->snr;
+#ifdef OPLUS_FEATURE_WIFI_SIGNAL
+//Add for:Avoid upload invalid RSSI to upper layer when a new connection established.
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	{
+#define HW_VALID_RSSI_THRESHOLD (-90)
+		bool isValidRssi = true;
+		int i = 0;
+		if (link_info->rssi < HW_VALID_RSSI_THRESHOLD) {
+			for (i = 0; i < NUM_CHAINS_MAX; i++) {
+				if (link_info->hdd_stats.per_chain_rssi_stats.rssi[i] != WLAN_HDD_TGT_NOISE_FLOOR_DBM)
+					break;
+			}
+			if (i == NUM_CHAINS_MAX)
+				isValidRssi = false;
+		}
+
+		if (!isValidRssi) {
+			hdd_debug("get invalid RSSI from FW, use RSSI from scan result! HW combined RSSI=%d, Chain RSSI=%d.",
+				link_info->rssi, link_info->hdd_stats.per_chain_rssi_stats.rssi[0]);
+			link_info->rssi = 0;
+		}
+#undef HW_VALID_RSSI_THRESHOLD
+	}
+#endif
+#endif /* OPLUS_FEATURE_WIFI_SIGNAL */
 
 	/* for new connection there might be no valid previous RSSI */
 	if (!link_info->rssi) {
@@ -7443,12 +7533,21 @@ static void wlan_hdd_update_rssi(struct wlan_hdd_link_info *link_info,
 					  &link_info->rssi, &snr);
 	}
 
+#ifndef OPLUS_FEATURE_WIFI_SIGNAL
+//Add for:Avoid upload RSSI 0dbm to upper layer shows as -128dbm of MLO link.
 	/* If RSSi is reported as positive then it is invalid */
 	if (link_info->rssi >= 0) {
 		hdd_debug_rl("Invalid RSSI %d, reset to -1", link_info->rssi);
 		link_info->rssi = -1;
 		link_info->hdd_stats.summary_stat.rssi = -1;
 	}
+#else
+	if (link_info->rssi >= 0) {
+		hdd_debug_rl("oplus RSSI invalid %d", link_info->rssi);
+		link_info->rssi = -1;
+		link_info->hdd_stats.summary_stat.rssi = -1;
+	}
+#endif /* OPLUS_FEATURE_WIFI_SIGNAL */
 
 	sinfo->signal = link_info->rssi;
 	hdd_debug("snr: %d, rssi: %d",
@@ -7494,7 +7593,6 @@ wlan_hdd_update_mlo_peer_stats(struct wlan_hdd_link_info *link_info,
 
 	sinfo->tx_bytes = peer_stats->tx.tx_success.bytes;
 	sinfo->rx_bytes = peer_stats->rx.rcvd.bytes;
-	sinfo->tx_packets = peer_stats->tx.tx_success.num;
 	sinfo->rx_packets = peer_stats->rx.rcvd.num;
 
 	hdd_nofl_debug("Updated sinfo with per peer stats");
@@ -7655,7 +7753,6 @@ static int wlan_hdd_update_rate_info(struct wlan_hdd_link_info *link_info,
 	ucfg_dp_get_net_dev_stats(vdev, &stats);
 	sinfo->tx_bytes = stats.tx_bytes;
 	sinfo->rx_bytes = stats.rx_bytes;
-	sinfo->tx_packets = stats.tx_packets;
 	sinfo->rx_packets = stats.rx_packets;
 	wlan_hdd_update_mlo_peer_stats(link_info, sinfo);
 
@@ -8738,9 +8835,7 @@ QDF_STATUS wlan_hdd_get_mib_stats(struct hdd_adapter *adapter)
 		return ret;
 	}
 
-#ifdef WLAN_DEBUGFS
 	hdd_debugfs_process_mib_stats(adapter, stats);
-#endif
 
 	wlan_cfg80211_mc_cp_stats_free_stats_event(stats);
 	return ret;
@@ -9881,8 +9976,6 @@ hdd_convert_roam_failures_reason(enum wlan_roam_failure_reason_code fail)
 	case ROAM_FAIL_REASON_SCAN_CANCEL:
 	case ROAM_FAIL_REASON_SCREEN_ACTIVITY:
 	case ROAM_FAIL_REASON_OTHER_PRIORITY_ROAM_SCAN:
-	case ROAM_FAIL_REASON_REASSOC_TO_SAME_AP:
-	case ROAM_FAIL_REASON_MLD_EXTRA_SCAN_REQUIRED:
 	case ROAM_FAIL_REASON_UNKNOWN:
 		hdd_err("Invalid roam failures reason");
 		break;

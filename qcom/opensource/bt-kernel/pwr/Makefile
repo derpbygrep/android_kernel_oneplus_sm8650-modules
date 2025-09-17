@@ -1,5 +1,3 @@
-ccflags-y += \
-        -I$(BT_ROOT)/include \
-        -I$(BT_ROOT)/../securemsm-kernel/include
+ccflags-y += -I$(BT_ROOT)/include
 
 obj-$(CONFIG_MSM_BT_POWER)  += btpower.o

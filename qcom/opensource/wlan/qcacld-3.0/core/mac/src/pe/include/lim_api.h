@@ -152,7 +152,6 @@ typedef enum eMgmtFrmDropReason {
 	eMGMT_DROP_DUPLICATE_AUTH_FRAME,
 	eMGMT_DROP_EXCESSIVE_MGMT_FRAME,
 	eMGMT_DROP_DEAUTH_DURING_ROAM_STARTED,
-	eMGMT_DROP_CONNECT_DURING_ROAMING,
 } tMgmtFrmDropReason;
 
 /**
@@ -638,7 +637,6 @@ bool lim_enable_cts_to_self_for_exempted_iot_ap(
  * @mac_ctx: Pointer to mac context
  * @session: pe session
  * @bss_desc: Pointer to bss description
- * @req_fail_status_code: Connect req fail status code pointer
  *
  * This api will fill lim pe session with info
  * from bss description
@@ -648,8 +646,7 @@ bool lim_enable_cts_to_self_for_exempted_iot_ap(
 QDF_STATUS
 lim_fill_pe_session(struct mac_context *mac_ctx,
 		    struct pe_session *session,
-		    struct bss_description *bss_desc,
-		    enum wlan_status_code *req_fail_status_code);
+		    struct bss_description *bss_desc);
 
 /**
  * lim_update_omn_ie_ch_width() - update omn_ie_ch_width in struct

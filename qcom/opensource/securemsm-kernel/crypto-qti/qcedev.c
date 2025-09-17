@@ -364,10 +364,6 @@ void qcedev_sha_req_cb(void *cookie, unsigned char *digest,
 	if (!areq || !areq->cookie)
 		return;
 	handle = (struct qcedev_handle *) areq->cookie;
-
-        if (!handle || !handle->cntl)
-                return;
-
 	pdev = handle->cntl;
 	if (!pdev)
 		return;
@@ -396,10 +392,6 @@ void qcedev_cipher_req_cb(void *cookie, unsigned char *icv,
 	if (!areq || !areq->cookie)
 		return;
 	handle = (struct qcedev_handle *) areq->cookie;
-
-	if (!handle || !handle->cntl)
-		return;
-
 	podev = handle->cntl;
 	if (!podev)
 		return;
@@ -581,9 +573,6 @@ static int start_offload_cipher_req(struct qcedev_control *podev,
 		case QCEDEV_OFFLOAD_HLOS_HLOS_1:
 		case QCEDEV_OFFLOAD_HLOS_CPB:
 		case QCEDEV_OFFLOAD_HLOS_CPB_1:
-		case QCEDEV_OFFLOAD_HLOS_CPB_2:
-		case QCEDEV_OFFLOAD_HLOS_CPB_3:
-		case QCEDEV_OFFLOAD_HLOS_CPB_4:
 			creq.dir = QCE_DECRYPT;
 			break;
 		case QCEDEV_OFFLOAD_CPB_HLOS:

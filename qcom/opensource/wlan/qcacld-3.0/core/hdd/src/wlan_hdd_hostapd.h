@@ -36,6 +36,17 @@
 
 /* Preprocessor definitions and constants */
 
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+void hostapdConnUeventInit(void);
+void hostapdConnUeventDeinit(void);
+void hostapdConnSendUevent(char *envp[]);
+void hostapd_driver_send_uevent(struct hdd_adapter *sta_adapter,
+                                uint32_t reasoncode,
+                                uint8_t *macaddr,
+                                eSapDisassocReason reason);
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
+
 struct hdd_adapter *hdd_wlan_create_ap_dev(struct hdd_context *hdd_ctx,
 				      tSirMacAddr macAddr,
 				      unsigned char name_assign_type,
@@ -460,12 +471,10 @@ void hdd_stop_sap_due_to_invalid_channel(struct work_struct *work);
 /**
  * hdd_is_any_sta_connecting() - check if any sta is connecting
  * @hdd_ctx: hdd context
- * @op_mode: adapter mode
  *
  * Return: true if any sta is connecting
  */
-bool hdd_is_any_sta_connecting(struct hdd_context *hdd_ctx,
-			       enum QDF_OPMODE op_mode);
+bool hdd_is_any_sta_connecting(struct hdd_context *hdd_ctx);
 
 /**
  * wlan_hdd_configure_twt_responder() - configure twt responder in sap_config
@@ -506,6 +515,12 @@ bool hdd_sap_is_acs_in_progress(struct wlan_objmgr_vdev *vdev)
 	return false;
 }
 #endif
+
+#ifdef OPLUS_BUG_STABILITY
+// Add for: hotspot manager
+int oplus_wlan_hdd_modify_acl(struct net_device *dev, char *extra);
+int oplus_wlan_hdd_set_max_assoc(struct net_device *dev, char *extra);
+#endif /* OPLUS_BUG_STABILITY */
 
 #ifdef WLAN_CHIPSET_STATS
 /*

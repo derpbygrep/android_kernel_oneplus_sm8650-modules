@@ -15,7 +15,7 @@
  * Define path if not defined in bazel file
  */
 #ifndef DSP_TRACE_INCLUDE_PATH
-#define DSP_TRACE_INCLUDE_PATH ../../../../sm8650-modules/qcom/opensource/dsp-kernel/dsp
+#define DSP_TRACE_INCLUDE_PATH ../../../../vendor/qcom/opensource/dsp-kernel/dsp
 #endif
 
 #undef TRACE_INCLUDE_PATH
@@ -26,7 +26,6 @@
 #define TRACE_INCLUDE_FILE fastrpc_trace
 
 #include <linux/tracepoint.h>
-#include <linux/version.h>
 
 TRACE_EVENT(fastrpc_transport_send,
 
@@ -386,14 +385,7 @@ TRACE_EVENT(fastrpc_msg,
 		memcpy(__get_str(buf), (message), (sizeof(message) - 1));
 		__get_str(buf)[sizeof(message) - 1] = '\0';
 #else
-		if (message)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-			__assign_str(buf);
-#else
-			__assign_str_len(buf, message, (sizeof(message) - 1));
-#endif
-		else
-			memcpy(__get_str(buf), "(null)", sizeof("(null)"));
+		__assign_str(buf, message);
 #endif
 	),
 	TP_printk(" %s", __get_str(buf))
@@ -418,14 +410,7 @@ TRACE_EVENT(fastrpc_dspsignal,
 		memcpy(__get_str(buf), (event), (sizeof(event) - 1));
 		__get_str(buf)[sizeof(event) - 1] = '\0';
 #else
-		if (event)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-			__assign_str(buf);
-#else
-			__assign_str_len(buf, event, (sizeof(event) - 1));
-#endif
-		else
-			memcpy(__get_str(buf), "(null)", sizeof("(null)"));
+		__assign_str(buf, event);
 #endif
 		__entry->signal_id = signal_id;
 		__entry->state = state;

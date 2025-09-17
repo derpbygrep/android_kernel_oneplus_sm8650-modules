@@ -3534,8 +3534,6 @@ int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 			}
 		}
 		context_free(ctx);
-		/* ctx is freed, so assign NULL to perf_counter to avoid UAF */
-		perf_counter = NULL;
 		trace_fastrpc_msg("context_free: end");
 	}
 	if (!kernel && VALID_FASTRPC_CID(cid)) {
@@ -4017,21 +4015,6 @@ static int fastrpc_mmap_remove_pdr(struct fastrpc_file *fl);
 static int fastrpc_channel_open(struct fastrpc_file *fl, uint32_t flags);
 static int fastrpc_dsp_restart_handler(struct fastrpc_file *fl, int locked, bool dump_req);
 
-/**
- * check_daemon_name_support
- * check if sharing daemon name to DSP is supported
- * @arg1: fastrpc user instance.
- *
- * Returns capability (1 if supported, 0 if not)
- */
-static int check_daemon_name_support(struct fastrpc_file *fl)
-{
-	struct fastrpc_dsp_capabilities *dsp_cap_ptr;
-
-	dsp_cap_ptr = &gcinfo[fl->cid].dsp_cap_kernel;
-	return dsp_cap_ptr->dsp_attributes[DAEMON_NAME_SUPPORT];
-}
-
 /*
  * This function makes a call to create a thread group in the root
  * process or static process on the remote subsystem.
@@ -4043,9 +4026,7 @@ static int fastrpc_init_attach_process(struct fastrpc_file *fl,
 					struct fastrpc_ioctl_init *init)
 {
 	int err = 0, tgid = fl->tgid_frpc;
-	int daemon_name_support = 0;
-	remote_arg_t ra[2];
-	uint32_t param[2], namelen = 0;
+	remote_arg_t ra[1];
 	struct fastrpc_ioctl_invoke_async ioctl;
 
 	if (fl->dev_minor == MINOR_NUM_DEV) {
@@ -4054,31 +4035,15 @@ static int fastrpc_init_attach_process(struct fastrpc_file *fl,
 			"untrusted app trying to attach to privileged DSP PD\n");
 		return err;
 	}
-
-	daemon_name_support = check_daemon_name_support(fl);
-
 	/*
 	 * Prepare remote arguments for creating thread group
 	 * in guestOS/staticPD on the remote subsystem.
 	 * Send unique fastrpc id to dsp
 	 */
-	if (daemon_name_support && init->flags == FASTRPC_INIT_ATTACH_SENSORS) {
-		namelen = strlen(current->comm) + 1;
-		param[0] = tgid;
-		param[1] = namelen;
-		ra[0].buf.pv = (void *)&param;
-		ra[0].buf.len = sizeof(param);
-		ra[1].buf.pv = (void *)current->comm;
-		ra[1].buf.len = namelen;
-		ioctl.inv.sc = REMOTE_SCALARS_MAKE(FASTRPC_RMID_INIT_CREATE_WITH_NAME, 2, 0);
-
-	} else {
-		ra[0].buf.pv = (void *)&tgid;
-		ra[0].buf.len = sizeof(tgid);
-		ioctl.inv.sc = REMOTE_SCALARS_MAKE(FASTRPC_RMID_INIT_ATTACH, 1, 0);
-	}
-
+	ra[0].buf.pv = (void *)&tgid;
+	ra[0].buf.len = sizeof(tgid);
 	ioctl.inv.handle = FASTRPC_STATIC_HANDLE_PROCESS_GROUP;
+	ioctl.inv.sc = REMOTE_SCALARS_MAKE(0, 1, 0);
 	ioctl.inv.pra = ra;
 	ioctl.fds = NULL;
 	ioctl.attrs = NULL;
@@ -6071,8 +6036,16 @@ skip_dmainvoke_wait:
 	is_locked = false;
 	spin_unlock_irqrestore(&fl->apps->hlock, irq_flags);
 
-	if (!fl->sctx)
-		goto bail;
+	if (!fl->sctx) {
+		spin_lock_irqsave(&me->hlock, irq_flags);
+		/* Reset the tgid usage to false */
+		if (fl->tgid_frpc != -1)
+			frpc_tgid_usage_array[fl->tgid_frpc] = false;
+		spin_unlock_irqrestore(&me->hlock, irq_flags);
+		kfree(fl);
+		fl = NULL;
+		return;
+	}
 
 	//Dummy wake up to exit Async worker thread
 	spin_lock_irqsave(&fl->aqlock, flags);
@@ -6126,22 +6099,23 @@ skip_dmainvoke_wait:
 	if (fl->device && is_driver_closed)
 		device_unregister(&fl->device->dev);
 
-	VERIFY(err, VALID_FASTRPC_CID(cid));
-	if (!err && fl->sctx)
-		fastrpc_session_free(&fl->apps->channel[cid], fl->sctx);
-	if (!err && fl->secsctx)
-		fastrpc_session_free(&fl->apps->channel[cid], fl->secsctx);
-	for (i = 0; i < (DSPSIGNAL_NUM_SIGNALS / DSPSIGNAL_GROUP_SIZE); i++)
-		kfree(fl->signal_groups[i]);
-	fastrpc_remote_buf_list_free(fl);
-
-bail:
 	spin_lock_irqsave(&me->hlock, irq_flags);
 	/* Reset the tgid usage to false */
 	if (fl->tgid_frpc != -1)
 		frpc_tgid_usage_array[fl->tgid_frpc] = false;
 	spin_unlock_irqrestore(&me->hlock, irq_flags);
+
+	VERIFY(err, VALID_FASTRPC_CID(cid));
+	if (!err && fl->sctx)
+		fastrpc_session_free(&fl->apps->channel[cid], fl->sctx);
+	if (!err && fl->secsctx)
+		fastrpc_session_free(&fl->apps->channel[cid], fl->secsctx);
+
+	for (i = 0; i < (DSPSIGNAL_NUM_SIGNALS / DSPSIGNAL_GROUP_SIZE); i++)
+		kfree(fl->signal_groups[i]);
 	mutex_destroy(&fl->signal_create_mutex);
+
+	fastrpc_remote_buf_list_free(fl);
 	mutex_destroy(&fl->map_mutex);
 	mutex_destroy(&fl->internal_map_mutex);
 	kfree(fl->dev_pm_qos_req);
@@ -6281,7 +6255,7 @@ static ssize_t fastrpc_debugfs_read(struct file *filp, char __user *buffer,
 	} else {
 		ret = fastrpc_file_get(fl);
 		if (ret) {
-			ADSPRPC_ERR("Failed to get user process reference\n");
+			ADSPRPC_ERR("Failed to get user process reference for fl (%pK)\n", fl);
 			goto bail;
 		}
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
@@ -6433,8 +6407,8 @@ static ssize_t fastrpc_debugfs_read(struct file *filp, char __user *buffer,
 	if (len > DEBUGFS_SIZE)
 		len = DEBUGFS_SIZE;
 	ret = simple_read_from_buffer(buffer, count, position, fileinfo, len);
-bail:
 	kfree(fileinfo);
+bail:
 	return ret;
 }
 
@@ -8212,7 +8186,7 @@ static int fastrpc_cb_probe(struct device *dev)
 			struct fastrpc_session_ctx *dup_sess;
 
 			for (j = 1; j < sharedcb_count &&
-			     chan->sesscount < (NUM_SESSIONS - 1); j++) {
+					chan->sesscount < NUM_SESSIONS; j++) {
 				chan->sesscount++;
 				dup_sess = &chan->session[chan->sesscount];
 				memcpy(dup_sess, sess,

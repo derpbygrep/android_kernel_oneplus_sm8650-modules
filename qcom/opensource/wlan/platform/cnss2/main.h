@@ -46,10 +46,6 @@
 #include "qmi.h"
 #include "cnss_prealloc.h"
 #include "cnss_common.h"
-#include <linux/pm_runtime.h>
-#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
-#include <linux/pm_domain.h>
-#endif
 
 #define MAX_NO_OF_MAC_ADDR		4
 #define QMI_WLFW_MAX_TIMESTAMP_LEN	32
@@ -78,7 +74,6 @@
 
 #define POWER_ON_RETRY_DELAY_MS         500
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
-#define CNSS_MBOX_MSG_MAX_LEN           64
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -90,6 +85,10 @@
 #define TME_OEM_FUSE_FILE_NAME		"peach_sec.dat"
 #define TME_RPR_FILE_NAME		"peach_rpr.bin"
 #define TME_DPR_FILE_NAME		"peach_dpr.bin"
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+extern bool idle_shutdown;
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 enum cnss_dt_type {
 	CNSS_DTT_LEGACY = 0,
@@ -121,11 +120,6 @@ struct cnss_vreg_info {
 
 enum cnss_vreg_type {
 	CNSS_VREG_PRIM,
-};
-
-enum cnss_pci_switch_type {
-	PCIE_DIRECT_ATTACH = 0,
-	PCIE_SWITCH_NTN3,
 };
 
 struct cnss_clk_cfg {
@@ -517,7 +511,6 @@ struct cnss_thermal_cdev {
 
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
-	enum cnss_driver_mode driver_mode;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
@@ -555,7 +548,6 @@ struct cnss_plat_data {
 	struct workqueue_struct *event_wq;
 	struct work_struct recovery_work;
 	struct delayed_work wlan_reg_driver_work;
-	struct work_struct cnss_dms_del_work;
 	struct qmi_handle qmi_wlfw;
 	struct qmi_handle qmi_dms;
 	struct wlfw_rf_chip_info chip_info;
@@ -650,6 +642,15 @@ struct cnss_plat_data {
 	bool sec_peri_feature_disable;
 	struct device_node *dev_node;
 	char device_name[CNSS_DEVICE_NAME_SIZE];
+	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	//Add for wifi switch monitor
+	unsigned long loadBdfState;
+	unsigned long loadRegdbState;
+	unsigned long pcieBusState;
+	unsigned long pcieEnumState;
+	unsigned long pcieLinkDown;
+	unsigned long pcieL1Fail;
+	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 	u32 plat_idx;
 	bool enumerate_done;
 	int qrtr_node_id;
@@ -660,13 +661,31 @@ struct cnss_plat_data {
 	bool no_bwscale;
 	bool sleep_clk;
 	struct wlchip_serial_id_v01 serial_id;
-	bool ipa_shared_cb_enable;
-	u32 pcie_switch_type;
-	bool is_fw_managed_pwr;
-	struct device **pd_devs;
-	int pd_count;
 };
-
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+enum cnss_load_state {
+	CNSS_LOAD_BDF_FAIL = 1,
+	CNSS_LOAD_BDF_SUCCESS,
+	CNSS_LOAD_REGDB_FAIL,
+	CNSS_LOAD_REGDB_SUCCESS,
+	CNSS_PROBE_FAIL,
+	CNSS_PROBE_SUCCESS,
+	CNSS_PCIEBUS_FAIL,
+	CNSS_PCIE_ENUM_FAIL,
+	CNSS_PCIE_LINK_DOWN,
+	CNSS_PCIE_L1_FAIL,
+};
+#define CNSS_ERROR_SIZE 64
+#define MAX_CNSS_ERROE_LIST_LENGTH 10
+#define CNSS_STRUCT_ITEM_LENGTH 80
+#define MAX_BUFFER_SIZE (CNSS_STRUCT_ITEM_LENGTH)*(MAX_CNSS_ERROE_LIST_LENGTH)
+struct cel_list {
+    u64 time_s;
+    char message[CNSS_ERROR_SIZE];
+    struct cel_list *next;
+};
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
 static inline u64 cnss_get_host_timestamp(struct cnss_plat_data *plat_priv)
 {
@@ -756,7 +775,6 @@ void cnss_aop_interface_deinit(struct cnss_plat_data *plat_priv);
 int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv);
 int cnss_aop_send_msg(struct cnss_plat_data *plat_priv, char *msg);
 void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv);
-void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv);
 int cnss_aop_ol_cpr_cfg_setup(struct cnss_plat_data *plat_priv,
 			      struct wlfw_pmu_cfg_v01 *fw_pmu_cfg);
 int cnss_request_firmware_direct(struct cnss_plat_data *plat_priv,
@@ -776,12 +794,4 @@ size_t cnss_get_platform_name(struct cnss_plat_data *plat_priv,
 			      char *buf, const size_t buf_len);
 int cnss_iommu_map(struct iommu_domain *domain, unsigned long iova,
 		   phys_addr_t paddr, size_t size, int prot);
-int cnss_select_pinctrl_enable(struct cnss_plat_data *plat_priv);
-int cnss_select_pinctrl_state(struct cnss_plat_data *plat_priv, bool state);
-int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
-				    bool enabled);
-int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv,
-			       bool enabled);
-int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv);
-void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv);
 #endif /* _CNSS_MAIN_H */

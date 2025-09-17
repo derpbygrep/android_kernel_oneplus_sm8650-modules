@@ -59,7 +59,10 @@
  * No. of filters reserving at wlan for IPA-XR usecase.
  */
 #define NO_OF_FILTERS		2
-#define IPA_WDI_FLT_RSRV_TIMEOUT_MS 200
+
+static void ipa_xr_wdi_opt_dpath_rsrv_filter_wq_handler(struct work_struct *work);
+static struct workqueue_struct *wlan_flt_rsrv_wq = NULL;
+static DECLARE_DELAYED_WORK(wlan_flt_rsrv_handle, ipa_xr_wdi_opt_dpath_rsrv_filter_wq_handler);
 
 struct ipa_wdi_intf_info {
 	char netdev_name[IPA_RESOURCE_NAME_MAX];
@@ -104,7 +107,7 @@ struct ipa_wdi_opt_dpath_add_flt_handle {
 	uint64_t filter_handle;
 };
 
-struct ipa_wdi_opt_dpath_add_flt_handle  add_flt_hndl[MAX_STREAMS];
+struct ipa_wdi_opt_dpath_add_flt_handle  add_flt_hndl[4];
 
 /**
  * opt_dpath_info contains fn callbacks which are set by WLAN context and
@@ -871,6 +874,23 @@ int ipa_wdi_enable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 		}
 	}
 
+	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_XR) {
+		if (wlan_flt_rsrv_wq == NULL) {
+			wlan_flt_rsrv_wq = create_singlethread_workqueue("wlan_flt_rsrv_wq");
+			if (!wlan_flt_rsrv_wq) {
+				IPA_WDI_ERR("failed to create wq\n");
+				return 0;
+			}
+
+			ret = queue_delayed_work(wlan_flt_rsrv_wq, &wlan_flt_rsrv_handle,
+				msecs_to_jiffies(QUEUE_DELAY_TIME));
+			if (!ret) {
+				IPA_WDI_ERR("failed to queue delayed wq\n");
+				return 0;
+			}
+		}
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(ipa_wdi_enable_pipes_per_inst);
@@ -1103,7 +1123,6 @@ int ipa_wdi_opt_dpath_notify_flt_rsvd_per_inst
 	(ipa_wdi_hdl_t hdl,	bool is_success)
 {
 	int ret = 0;
-	int flt_rsv_status = 0;
 	struct ipa_wlan_opt_dp_rsrv_filter_complt_ind_msg_v01 ind;
 
 	if (hdl < 0 || hdl >= IPA_WDI_INST_MAX) {
@@ -1125,10 +1144,7 @@ int ipa_wdi_opt_dpath_notify_flt_rsvd_per_inst
 	}
 
 	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_XR) {
-		IPA_WDI_DBG("Received wlan flt rsv status %d\n", is_success);
-		flt_rsv_status = is_success ? 1 : 0;
-		atomic_set(&ipa3_ctx->ipa_xr_wdi_flt_rsv_status, flt_rsv_status);
-		complete(&ipa3_ctx->ipa_xr_wdi_flt_rsrv_success);
+		ipa3_ctx->ipa_xr_wdi_flt_rsv_status = is_success;
 		return ret;
 	}
 
@@ -1153,7 +1169,6 @@ int ipa_wdi_opt_dpath_notify_flt_rlsd_per_inst
 	(ipa_wdi_hdl_t hdl,	bool is_success)
 {
 	int ret = 0;
-	int flt_rsv_status = 0;
 	struct ipa_wlan_opt_dp_remove_all_filter_complt_ind_msg_v01 ind;
 
 	if (hdl < 0 || hdl >= IPA_WDI_INST_MAX) {
@@ -1167,13 +1182,8 @@ int ipa_wdi_opt_dpath_notify_flt_rlsd_per_inst
 	}
 
 	ret = ipa_pm_deferred_deactivate(ipa_wdi_ctx_list[0]->ipa_pm_hdl);
-
-	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_XR) {
-		IPA_WDI_DBG("Received wlan flt rlsd status %d\n", is_success);
-		flt_rsv_status = is_success ? 0 : 1;
-		atomic_set(&ipa3_ctx->ipa_xr_wdi_flt_rsv_status, flt_rsv_status);
+	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_XR)
 		return ret;
-	}
 
 	memset(&ind, 0, sizeof(ind));
 	ind.filter_removal_all_status.result =
@@ -1466,7 +1476,6 @@ int ipa_xr_wdi_opt_dpath_rsrv_filter_req(void)
 {
 	int ret = 0;
 	struct ipa_wdi_opt_dpath_flt_rsrv_cb_params rsrv_filter_req;
-	int rsrv_completed;
 
 	memset(&rsrv_filter_req, 0, sizeof(struct ipa_wdi_opt_dpath_flt_rsrv_cb_params));
 	if (!atomic_read(&opt_dpath_info[0].is_xr_opt_dp_cb_registered)) {
@@ -1485,7 +1494,6 @@ int ipa_xr_wdi_opt_dpath_rsrv_filter_req(void)
 		return -EFAULT;
 	}
 
-	init_completion(&ipa3_ctx->ipa_xr_wdi_flt_rsrv_success);
 	rsrv_filter_req.num_filters = NO_OF_FILTERS;
 	ret = opt_dpath_info[0].flt_rsrv_cb(
 			opt_dpath_info[0].priv, &rsrv_filter_req);
@@ -1497,12 +1505,6 @@ int ipa_xr_wdi_opt_dpath_rsrv_filter_req(void)
 	}
 
 	IPA_WDI_DBG("reserved filter callbacks called.\n");
-	rsrv_completed = wait_for_completion_timeout(&ipa3_ctx->ipa_xr_wdi_flt_rsrv_success,
-						 msecs_to_jiffies(IPA_WDI_FLT_RSRV_TIMEOUT_MS));
-	if (!rsrv_completed) {
-		IPADBG("Timed out waiting for filter reservation notification from WLAN\n");
-		return -EPERM;
-	}
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ipa_xr_wdi_opt_dpath_rsrv_filter_req);
@@ -1530,9 +1532,8 @@ int ipa_xr_wdi_opt_dpath_add_filter_req(struct ipa_wdi_opt_dpath_flt_add_cb_para
 	ret =
 		opt_dpath_info[0].flt_add_cb
 			(opt_dpath_info[0].priv, req);
-	IPA_WDI_DBG("Add filter callbacks called for stream id %d\n", stream_id);
-	if (!ret)
-		add_flt_hndl[stream_id].filter_handle = req->flt_info[0].out_hdl;
+	add_flt_hndl[stream_id].filter_handle = req->flt_info[0].out_hdl;
+	IPA_WDI_DBG("add filter callbacks called, stream id %d\n", stream_id);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ipa_xr_wdi_opt_dpath_add_filter_req);
@@ -1562,9 +1563,7 @@ int ipa_xr_wdi_opt_dpath_remove_filter_req(u32 stream_id)
 
 	ret = opt_dpath_info[0].flt_rem_cb
 			(opt_dpath_info[0].priv, &flt_rem_req);
-	IPA_WDI_DBG("Remove filter callbacks called for stream id %d\n", stream_id);
-	if (!ret)
-		add_flt_hndl[stream_id].filter_handle = 0;
+	IPA_WDI_DBG("remove filter callbacks called, stream id %d\n", stream_id);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ipa_xr_wdi_opt_dpath_remove_filter_req);
@@ -1606,6 +1605,16 @@ int ipa_xr_wdi_opt_dpath_remove_all_filter_req(void)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ipa_xr_wdi_opt_dpath_remove_all_filter_req);
+
+
+static void ipa_xr_wdi_opt_dpath_rsrv_filter_wq_handler(struct work_struct *work)
+{
+	int res = 0;
+
+	res = ipa_xr_wdi_opt_dpath_rsrv_filter_req();
+	if (res)
+		IPAERR("Failed to reserve the filters in wlan\n");
+}
 
 /**
  * clean up WDI IPA offload data path
@@ -1764,6 +1773,11 @@ int ipa_wdi_disconn_pipes_per_inst(ipa_wdi_hdl_t hdl)
 		return -EPERM;
 	}
 
+	if (wlan_flt_rsrv_wq) {
+		destroy_workqueue(wlan_flt_rsrv_wq);
+		wlan_flt_rsrv_wq = NULL;
+	}
+
 	if (ipa_wdi_ctx_list[hdl]->wdi_version >= IPA_WDI_1 &&
 		ipa_wdi_ctx_list[hdl]->wdi_version < IPA_WDI_3 &&
 		hdl > 0) {
@@ -1905,8 +1919,6 @@ int ipa_wdi_disable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 		return -EFAULT;
 	}
 
-	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_XR)
-		atomic_set(&ipa3_ctx->ipa_xr_wdi_flt_rsv_status, 0);
 	return 0;
 }
 EXPORT_SYMBOL(ipa_wdi_disable_pipes_per_inst);

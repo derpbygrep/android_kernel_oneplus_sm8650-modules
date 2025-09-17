@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_i.h"
@@ -15,7 +15,8 @@
 /* TR==> 1024B  * 8B TRE * 2 pipes */
 #define IPA_UC_CON_TRANSFER_RING_SIZE  1024
 
-#define MAX_NUMBER_OF_PARTITIONS NO_OF_BUFFS
+#define MAX_NUMBER_OF_STREAMS 4
+#define MAX_NUMBER_OF_PARTITIONS MAX_NUMBER_OF_STREAMS
 
 #define MAX_UC_PROD_PIPES 4
 #define MAX_UC_CONS_PIPES 2
@@ -23,6 +24,8 @@
 #define MAX_UC_PROD_PIPES_TR_INDEX MAX_UC_PROD_PIPES
 #define MAX_UC_PROD_PIPES_ER_INDEX (MAX_UC_PROD_PIPES_TR_INDEX + MAX_UC_PROD_PIPES)
 #define MAX_UC_CONS_PIPES_TR_INDEX (MAX_UC_PROD_PIPES_ER_INDEX + MAX_UC_CONS_PIPES)
+
+#define ER_TR_UC_BUFFS (MAX_UC_PROD_PIPES + MAX_UC_PROD_PIPES + MAX_UC_CONS_PIPES)
 
 #define MAX_SYNX_FENCE_SESSION_NAME  64
 #define DMA_DIR DMA_BIDIRECTIONAL
@@ -57,6 +60,24 @@ enum ipa3_cpu_2_hw_rtp_commands {
 		FEATURE_ENUM_VAL(IPA_HW_FEATURE_RTP, 11),
 };
 
+struct bitstream_buffer_info_to_uc {
+	uint8_t stream_id;
+	uint16_t fence_id;
+	uint8_t reserved;
+	u64 buff_addr;
+	u32 buff_fd;
+	u32 buff_size;
+	u64 meta_buff_addr;
+	u32 meta_buff_fd;
+	u32 meta_buff_size;
+} __packed;
+
+struct bitstream_buffers_to_uc {
+	uint16_t buff_cnt;
+	uint16_t cookie;
+	struct bitstream_buffer_info_to_uc bs_info[MAX_BUFF];
+} __packed;
+
 struct dma_address_map_table {
 	struct dma_buf *dma_buf_list[2];
 	struct dma_buf_attachment *attachment[2];
@@ -84,15 +105,17 @@ struct prod_pipe_tre {
 } __packed;
 
 struct con_pipe_tre {
-	uint16_t bufferIndex;
-	uint16_t offset2Payload;
-	uint16_t payloadSize:16;
-	uint8_t  valid:1;
-	uint8_t  ieot:1;
-	uint8_t  tre_type:2;
-	uint8_t  reserved0:4;
-	uint8_t  last_tre:1;
-	uint8_t  reserved1:7;
+	uint64_t buffer_ptr;
+	uint16_t buf_len;
+	uint16_t resvd1;
+	uint16_t chain:1;
+	uint16_t resvd4:7;
+	uint16_t ieob:1;
+	uint16_t ieot:1;
+	uint16_t bei:1;
+	uint16_t resvd3:5;
+	uint8_t re_type;
+	uint8_t resvd2;
 } __packed;
 
 struct temp_buff_info {
@@ -108,7 +131,7 @@ struct rtp_pipe_setup_cmd_data {
 
 struct hfi_queue_info {
 	u64 hfi_queue_addr;
-	u32 hfi_queue_payload_size;
+	u32 hfi_queue_size;
 	u64 queue_header_start_addr;
 	u64 queue_payload_start_addr;
 } __packed;
@@ -124,39 +147,22 @@ struct uc_temp_buffer_info {
 } __packed;
 
 struct er_tr_to_free {
-	void *cpu_address_prod_tr[MAX_UC_PROD_PIPES];
-	void *cpu_address_prod_er[MAX_UC_PROD_PIPES];
-	void *cpu_address_cons_tr[MAX_UC_CONS_PIPES];
+	void *cpu_address[ER_TR_UC_BUFFS];
 	struct rtp_pipe_setup_cmd_data rtp_tr_er;
-	uint8_t prod_tr_no_buffs;
-	uint8_t prod_er_no_buffs;
-	uint8_t cons_tr_no_buffs;
-} __packed;
-
-struct traffic_selector_info_to_uc {
-	uint32_t no_of_openframe;
-	uint32_t max_pkt_frame;
-	uint32_t stream_type;
-	uint32_t reorder_timeout;
-	uint32_t num_slices_per_frame;
-} __packed;
-
-struct traffic_tuple_info_to_uc {
-	struct traffic_selector_info_to_uc ts_info;
-	uint8_t stream_id;
+	uint16_t no_buffs;
 } __packed;
 
 struct er_tr_to_free er_tr_cpu_addresses;
 void *cpu_address[NO_OF_BUFFS];
 struct uc_temp_buffer_info tb_info;
-struct list_head mapped_bs_buff_lst[MAX_STREAMS];
+struct list_head mapped_bs_buff_lst[MAX_NUMBER_OF_STREAMS];
 struct synx_session *glob_synx_session_ptr;
 
-int ipa3_uc_send_tuple_info_cmd(struct traffic_tuple_info *data, uint8_t stream_id)
+int ipa3_uc_send_tuple_info_cmd(struct traffic_tuple_info *data)
 {
 	int result = 0;
 	struct ipa_mem_buffer cmd;
-	struct traffic_tuple_info_to_uc *cmd_data;
+	struct traffic_tuple_info *cmd_data;
 
 	if (!data) {
 		IPAERR("Invalid params.\n");
@@ -171,20 +177,32 @@ int ipa3_uc_send_tuple_info_cmd(struct traffic_tuple_info *data, uint8_t stream_
 		return -ENOMEM;
 	}
 
-	cmd_data = (struct traffic_tuple_info_to_uc *)cmd.base;
+	cmd_data = (struct traffic_tuple_info *)cmd.base;
 	cmd_data->ts_info.no_of_openframe = data->ts_info.no_of_openframe;
 	cmd_data->ts_info.max_pkt_frame = data->ts_info.max_pkt_frame;
 	cmd_data->ts_info.stream_type = data->ts_info.stream_type;
 	cmd_data->ts_info.reorder_timeout = data->ts_info.reorder_timeout;
 	cmd_data->ts_info.num_slices_per_frame = data->ts_info.num_slices_per_frame;
-	cmd_data->stream_id = stream_id;
-	IPADBG("Sending uc CMD RTP_TUPLE_INFO with %u\n", cmd_data->stream_id);
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
+	cmd_data->ip_type = data->ip_type;
+	if (cmd_data->ip_type) {
+		cmd_data->ip_info.ipv6.src_port_number = data->ip_info.ipv6.src_port_number;
+		cmd_data->ip_info.ipv6.dst_port_number = data->ip_info.ipv6.dst_port_number;
+		memcpy(cmd_data->ip_info.ipv6.src_ip, data->ip_info.ipv6.src_ip, 16);
+		memcpy(cmd_data->ip_info.ipv6.dst_ip, data->ip_info.ipv6.dst_ip, 16);
+		cmd_data->ip_info.ipv6.protocol = data->ip_info.ipv6.protocol;
+	} else {
+		cmd_data->ip_info.ipv4.src_port_number = data->ip_info.ipv4.src_port_number;
+		cmd_data->ip_info.ipv4.dst_port_number = data->ip_info.ipv4.dst_port_number;
+		cmd_data->ip_info.ipv4.src_ip = data->ip_info.ipv4.src_ip;
+		cmd_data->ip_info.ipv4.dst_ip = data->ip_info.ipv4.dst_ip;
+		cmd_data->ip_info.ipv4.protocol = data->ip_info.ipv4.protocol;
+	}
+
+	IPADBG("Sending uc CMD RTP_TUPLE_INFO\n");
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_TUPLE_INFO,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("uc send tuple info cmd failed\n");
 		result = -EPERM;
@@ -204,8 +222,9 @@ int ipa3_tuple_info_cmd_to_wlan_uc(struct traffic_tuple_info *req, u32 stream_id
 		return -EINVAL;
 	}
 
-	if (!atomic_read(&ipa3_ctx->ipa_xr_wdi_flt_rsv_status)) {
+	if (!ipa3_ctx->ipa_xr_wdi_flt_rsv_status) {
 		result = ipa_xr_wdi_opt_dpath_rsrv_filter_req();
+		ipa3_ctx->ipa_xr_wdi_flt_rsv_status = !result;
 		if (result) {
 			IPAERR("filter reservation failed at WLAN %d\n", result);
 			return result;
@@ -245,19 +264,17 @@ int ipa3_tuple_info_cmd_to_wlan_uc(struct traffic_tuple_info *req, u32 stream_id
 			flt_add_req.flt_info[0].ipv6_addr.ipv6_daddr[3]);
 	}
 
-	result = ipa3_uc_send_tuple_info_cmd(req, stream_id);
-	if (result) {
-		IPAERR("Fail to send tuple info cmd to uc\n");
-		return -EPERM;
-	}
-	else
-		IPADBG("send tuple info cmd to uc succeeded\n");
-
 	result = ipa_xr_wdi_opt_dpath_add_filter_req(&flt_add_req, stream_id);
 	if (result) {
 		IPAERR("Fail to send tuple info cmd to wlan\n");
 		return -EPERM;
 	}
+
+	result = ipa3_uc_send_tuple_info_cmd(req);
+	if (result)
+		IPAERR("Fail to send tuple info cmd to uc\n");
+	else
+		IPADBG("send tuple info cmd to uc succeeded\n");
 
 	return result;
 }
@@ -274,9 +291,8 @@ int ipa3_uc_send_remove_stream_cmd(struct remove_bitstream_buffers *data)
 	}
 
 	result = ipa_xr_wdi_opt_dpath_remove_filter_req(data->stream_id);
-	if (result) {
+	if (result)
 		IPAERR("Failed to remove wlan filter of stream ID %d\n", data->stream_id);
-	}
 
 	cmd.size = sizeof(*cmd_data);
 	cmd.base = dma_alloc_coherent(ipa3_ctx->uc_pdev, cmd.size,
@@ -289,12 +305,10 @@ int ipa3_uc_send_remove_stream_cmd(struct remove_bitstream_buffers *data)
 	cmd_data = (struct remove_bitstream_buffers *)cmd.base;
 	cmd_data->stream_id = data->stream_id;
 	IPADBG("Sending uc CMD RTP_REMOVE_STREAM\n");
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_REMOVE_STREAM,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("uc send remove stream cmd failed\n");
 		result = -EPERM;
@@ -329,12 +343,10 @@ int ipa3_uc_send_add_bitstream_buffers_cmd(struct bitstream_buffers_to_uc *data)
 	memcpy(cmd_data->bs_info, data->bs_info, (cmd_data->buff_cnt *
 		sizeof(struct bitstream_buffer_info_to_uc)));
 	IPADBG("Sending uc CMD RTP_ADD_BIT_STREAM_BUFF\n");
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_ADD_BIT_STREAM_BUFF,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("uc send bitstream buffers info cmd failed\n");
 		result = -EPERM;
@@ -368,12 +380,10 @@ int ipa3_uc_send_temp_buffers_info_cmd(struct uc_temp_buffer_info *data)
 	memcpy(cmd_data->buffer_info, data->buffer_info,
 		(sizeof(struct temp_buffer_info)*cmd_data->number_of_partitions));
 	IPADBG("Sending uc CMD RTP_ADD_TEMP_BUFF_INFO\n");
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_ADD_TEMP_BUFF_INFO,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("uc send temp buffers info cmd failed\n");
 		result = -EPERM;
@@ -454,12 +464,10 @@ int ipa3_uc_send_RTPPipeSetup_cmd(struct rtp_pipe_setup_cmd_data *rtp_cmd_data)
 	memcpy(cmd_data->uc_cons_tr, rtp_cmd_data->uc_cons_tr,
 		(sizeof(struct temp_buff_info) * MAX_UC_CONS_PIPES));
 	IPADBG("Sending uc CMD RTP_PIPE_SETUP\n");
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_PIPE_SETUP,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("send RTP pipe setup cmd failed\n");
 		result = -EPERM;
@@ -505,8 +513,8 @@ static int ipa3_uc_setup_prod_pipe_transfer_ring(
 
 	rtp_cmd_data->uc_prod_tr[idx].temp_buff_pa = ring.phys_base;
 	rtp_cmd_data->uc_prod_tr[idx].temp_buff_size = ring.size;
-	er_tr_cpu_addresses.cpu_address_prod_tr[idx] = ring.base;
-	er_tr_cpu_addresses.prod_tr_no_buffs += 1;
+	er_tr_cpu_addresses.cpu_address[er_tr_cpu_addresses.no_buffs] = ring.base;
+	er_tr_cpu_addresses.no_buffs += 1;
 	IPADBG("prod pipe transfer ring setup done\n");
 	return 0;
 }
@@ -531,8 +539,8 @@ static int ipa3_uc_setup_prod_pipe_event_ring(
 
 	rtp_cmd_data->uc_prod_er[index].temp_buff_pa = ring.phys_base;
 	rtp_cmd_data->uc_prod_er[index].temp_buff_size = ring.size;
-	er_tr_cpu_addresses.cpu_address_prod_er[index] = ring.base;
-	er_tr_cpu_addresses.prod_er_no_buffs += 1;
+	er_tr_cpu_addresses.cpu_address[er_tr_cpu_addresses.no_buffs] = ring.base;
+	er_tr_cpu_addresses.no_buffs += 1;
 	IPADBG("prod pipe event ring setup done\n");
 	return 0;
 }
@@ -557,35 +565,45 @@ static int ipa3_uc_setup_con_pipe_transfer_ring(
 
 	rtp_cmd_data->uc_cons_tr[index].temp_buff_pa = ring.phys_base;
 	rtp_cmd_data->uc_cons_tr[index].temp_buff_size = ring.size;
-	er_tr_cpu_addresses.cpu_address_cons_tr[index] = ring.base;
-	er_tr_cpu_addresses.cons_tr_no_buffs += 1;
+	er_tr_cpu_addresses.cpu_address[er_tr_cpu_addresses.no_buffs] = ring.base;
+	er_tr_cpu_addresses.no_buffs += 1;
 	IPADBG("con pipe transfer ring setup done\n");
 	return 0;
 }
 
 void ipa3_free_uc_pipes_er_tr(void)
 {
-	uint8_t index = 0;
+	uint16_t index = 0;
 
-	for (index = 0; index < er_tr_cpu_addresses.prod_tr_no_buffs; index++) {
-		dma_free_coherent(ipa3_ctx->uc_pdev,
-		er_tr_cpu_addresses.rtp_tr_er.uc_prod_tr[index].temp_buff_size,
-		er_tr_cpu_addresses.cpu_address_prod_tr[index],
-		er_tr_cpu_addresses.rtp_tr_er.uc_prod_tr[index].temp_buff_pa);
-	}
-
-	for (index = 0; index < er_tr_cpu_addresses.prod_er_no_buffs; index++) {
-		dma_free_coherent(ipa3_ctx->uc_pdev,
-		er_tr_cpu_addresses.rtp_tr_er.uc_prod_er[index].temp_buff_size,
-		er_tr_cpu_addresses.cpu_address_prod_er[index],
-		er_tr_cpu_addresses.rtp_tr_er.uc_prod_er[index].temp_buff_pa);
-	}
-
-	for (index = 0; index < er_tr_cpu_addresses.cons_tr_no_buffs; index++) {
-		dma_free_coherent(ipa3_ctx->uc_pdev,
-		er_tr_cpu_addresses.rtp_tr_er.uc_cons_tr[index].temp_buff_size,
-		er_tr_cpu_addresses.cpu_address_cons_tr[index],
-		er_tr_cpu_addresses.rtp_tr_er.uc_cons_tr[index].temp_buff_pa);
+	for (index = 0; index < er_tr_cpu_addresses.no_buffs; index++) {
+		if (index < MAX_UC_PROD_PIPES_TR_INDEX) {
+			dma_free_coherent(ipa3_ctx->uc_pdev,
+			er_tr_cpu_addresses.rtp_tr_er.uc_prod_tr[index].temp_buff_size,
+			er_tr_cpu_addresses.cpu_address[index],
+			er_tr_cpu_addresses.rtp_tr_er.uc_prod_tr[index].temp_buff_pa);
+		} else if (index >= MAX_UC_PROD_PIPES_TR_INDEX &&
+				index < MAX_UC_PROD_PIPES_ER_INDEX) {
+			/* subtracting MAX_UC_PROD_TR_INDEX here because,
+			 * uc_prod_er[] is of size MAX_UC_PROD_PIPES only
+			 */
+			dma_free_coherent(ipa3_ctx->uc_pdev,
+			er_tr_cpu_addresses.rtp_tr_er.uc_prod_er[index
+					-MAX_UC_PROD_PIPES_TR_INDEX].temp_buff_size,
+			er_tr_cpu_addresses.cpu_address[index],
+			er_tr_cpu_addresses.rtp_tr_er.uc_prod_er[index
+					-MAX_UC_PROD_PIPES_TR_INDEX].temp_buff_pa);
+		} else if (index >= MAX_UC_PROD_PIPES_ER_INDEX &&
+				index < MAX_UC_CONS_PIPES_TR_INDEX) {
+			/* subtracting MAX_UC_PROD_TR_INDEX here because,
+			 * uc_cons_tr[] is of size MAX_UC_CONS_PIPES only
+			 */
+			dma_free_coherent(ipa3_ctx->uc_pdev,
+			er_tr_cpu_addresses.rtp_tr_er.uc_cons_tr[index
+					-MAX_UC_PROD_PIPES_ER_INDEX].temp_buff_size,
+			er_tr_cpu_addresses.cpu_address[index],
+			er_tr_cpu_addresses.rtp_tr_er.uc_cons_tr[index
+					-MAX_UC_PROD_PIPES_ER_INDEX].temp_buff_pa);
+		}
 	}
 
 	IPADBG("freed uc pipes er and tr memory\n");
@@ -758,7 +776,7 @@ int ipa3_smmu_map_buff(uint64_t bitstream_buffer_fd,
 		goto dma_buff_det;
 	}
 
-	attachment = dma_buf_attach(dbuff, ipa3_ctx->uc_pdev);
+	attachment = dma_buf_attach(dbuff, ipa3_ctx->rtp_pdev);
 	if (IS_ERR_OR_NULL(attachment)) {
 		IPAERR("dma buf attachment failed.\n");
 		err = -EFAULT;
@@ -830,7 +848,6 @@ int ipa3_smmu_unmap_buff(uint64_t bitstream_buffer_fd, uint64_t meta_buff_fd, in
 	}
 
 	IPADBG("smmu unmap done\n");
-	dma_buf_put(dbuff);
 	kfree(map_table);
 	return 0;
 }
@@ -981,16 +998,12 @@ int ipa3_send_bitstream_buff_info(struct bitstream_buffers *data)
 			}
 
 			tmp.bs_info[index].buff_addr = map_table->sgt[0]->sgl->dma_address;
-			tmp.bs_info[index].meta_buff_addr = map_table->sgt[1]->sgl->dma_address
-				+ data->bs_info[index].meta_buff_offset;
+			tmp.bs_info[index].meta_buff_addr  = map_table->sgt[1]->sgl->dma_address;
 		} else {
 			tmp.bs_info[index].buff_addr = map_table->sgt[0]->sgl->dma_address +
 			data->bs_info[index].buff_offset;
-			tmp.bs_info[index].meta_buff_addr = map_table->sgt[1]->sgl->dma_address
-				+ data->bs_info[index].meta_buff_offset;
+			tmp.bs_info[index].meta_buff_addr  = map_table->sgt[1]->sgl->dma_address;
 		}
-
-		dma_buf_put(dmab);
 	}
 
 	return ipa3_uc_send_add_bitstream_buffers_cmd(&tmp);
@@ -1018,12 +1031,10 @@ int ipa3_uc_send_hfi_cmd(struct hfi_queue_info *data)
 	cmd_data = (struct hfi_queue_info *)cmd.base;
 	memcpy(cmd_data, data, sizeof(struct hfi_queue_info));
 	IPADBG("Sending uc CMD RTP_GET_HFI_STRUCT\n");
-	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	result = ipa3_uc_send_cmd((u32)(cmd.phys_base),
 				IPA_CPU_2_HW_CMD_RTP_GET_HFI_STRUCT,
 				0,
 				false, 10*HZ);
-	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	if (result) {
 		IPAERR("uc send hfi queue info cmd failed\n");
 		result = -EPERM;
@@ -1042,7 +1053,6 @@ int ipa3_create_hfi_send_uc(void)
 	struct hfi_queue_info data;
 	dma_addr_t hfi_queue_addr = 0;
 	struct ipa_smmu_cb_ctx *cb = NULL;
-	struct synx_hw_fence_hfi_queue_header *hfi_queue_payload_vptr = NULL;
 
 	snprintf(synx_session_name, MAX_SYNX_FENCE_SESSION_NAME, "ipa synx fence");
 	queue_desc.vaddr = NULL;
@@ -1076,31 +1086,11 @@ int ipa3_create_hfi_send_uc(void)
 
 	hfi_queue_addr = queue_desc.dev_addr;
 	data.hfi_queue_addr = hfi_queue_addr;
+	data.hfi_queue_size = queue_desc.size;
 	data.queue_header_start_addr = hfi_queue_addr +
 			sizeof(struct synx_hw_fence_hfi_queue_table_header);
 	data.queue_payload_start_addr = data.queue_header_start_addr +
 			sizeof(struct synx_hw_fence_hfi_queue_header);
-	hfi_queue_payload_vptr = (struct synx_hw_fence_hfi_queue_header *)(queue_desc.vaddr +
-				sizeof(struct synx_hw_fence_hfi_queue_table_header));
-	data.hfi_queue_payload_size = hfi_queue_payload_vptr->queue_size;
-	IPADBG("hfi queue payload vptr is 0x%x\n", hfi_queue_payload_vptr);
-	IPADBG("hfi queue payload size is 0x%x\n", data.hfi_queue_payload_size);
 	res = ipa3_uc_send_hfi_cmd(&data);
-	if (res) {
-		iommu_unmap(cb->iommu_domain, queue_desc.dev_addr, queue_desc.size);
-		synx_uninitialize(glob_synx_session_ptr);
-	}
-
 	return res;
-}
-
-void ipa3_synx_uninitialize(void)
-{
-	if (IS_ERR_OR_NULL(glob_synx_session_ptr)) {
-		IPAERR("invalid synx fence session ptr to uninitialize\n");
-		return;
-	}
-
-	synx_uninitialize(glob_synx_session_ptr);
-	IPADBG("synx uninitialized successfully\n");
 }

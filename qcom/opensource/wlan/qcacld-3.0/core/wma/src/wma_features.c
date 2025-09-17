@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -74,6 +74,12 @@
 #include <wlan_crypto_global_api.h>
 #include "cdp_txrx_host_stats.h"
 #include "target_if_cm_roam_event.h"
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+//add for  connectivity power monitor
+#include <linux/workqueue.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 #include <wlan_mlo_mgr_cmn.h>
 #include "hif.h"
 #include "wlan_cmn_ieee80211.h"
@@ -98,7 +104,11 @@
 #define ADDBA_TXAGGR_SIZE_512 512
 #define ADDBA_TXAGGR_SIZE_BERYLLIUM 1024
 
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 static bool is_wakeup_event_console_logs_enabled = false;
+#else
+static bool is_wakeup_event_console_logs_enabled = true;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 void wma_set_wakeup_logs_to_console(bool value)
 {
@@ -606,8 +616,15 @@ QDF_STATUS wma_set_wisa_params(tp_wma_handle wma_handle,
 }
 
 #ifdef FEATURE_WLAN_APF
-enum wmi_host_active_apf_mode
-wma_get_fw_active_apf_mode(enum active_apf_mode mode)
+/*
+ * get_fw_active_apf_mode() - convert HDD APF mode to FW configurable APF
+ * mode
+ * @mode: APF mode maintained in HDD
+ *
+ * Return: FW configurable BP mode
+ */
+static enum wmi_host_active_apf_mode
+get_fw_active_apf_mode(enum active_apf_mode mode)
 {
 	switch (mode) {
 	case ACTIVE_APF_DISABLED:
@@ -656,13 +673,10 @@ QDF_STATUS wma_enable_active_apf_mode(WMA_HANDLE handle, tAniDHCPInd *ta_dhcp_in
 		ret = -EINVAL;
 		goto release_ref_and_return;
 	}
-
 	if (vdev_mlme->mgmt.generic.type == WMI_VDEV_TYPE_STA &&
 	    ucfg_pmo_is_apf_enabled(wma_handle->psoc)) {
-		uc_mode = wma_get_fw_active_apf_mode(
-					wma_handle->active_uc_apf_mode);
-		mcbc_mode = wma_get_fw_active_apf_mode(
-					wma_handle->active_mc_bc_apf_mode);
+		uc_mode = get_fw_active_apf_mode(wma_handle->active_uc_apf_mode);
+		mcbc_mode = get_fw_active_apf_mode(wma_handle->active_mc_bc_apf_mode);
 		wma_debug("Configuring Active APF Mode UC:%d MC/BC:%d for vdev %u",
 			  uc_mode, mcbc_mode, vdev_id);
 
@@ -1511,8 +1525,7 @@ static bool handle_csa_standby_link(wmi_csa_event_fixed_param *csa_event,
 			(struct qdf_mac_addr *)&mld_addr[0],
 			&mldev);
 	if (!mldev) {
-		wma_err("NULL ml dev ctx, link id %d peer mld addr " QDF_MAC_ADDR_FMT,
-			csa_event->link_id, QDF_MAC_ADDR_REF(&mld_addr[0]));
+		wma_err("NULL ml dev ctx");
 		return is_csa_standby;
 	}
 
@@ -1520,14 +1533,13 @@ static bool handle_csa_standby_link(wmi_csa_event_fixed_param *csa_event,
 	link_info = mlo_mgr_get_ap_link_by_link_id(mldev,
 						   link_id);
 	if (!link_info) {
-		wma_err("NULL link info link id %d peer mld addr " QDF_MAC_ADDR_FMT,
-			csa_event->link_id, QDF_MAC_ADDR_REF(&mld_addr[0]));
+		wma_err("NULL link info ");
 		return is_csa_standby;
 	}
 
 	if (link_info->vdev_id != WLAN_INVALID_VDEV_ID) {
-		wma_err("vdev id %d link id %d ", link_info->vdev_id,
-			link_id);
+		wma_debug("vdev id %d link id %d ", link_info->vdev_id,
+			  link_id);
 		return is_csa_standby;
 	}
 
@@ -1600,15 +1612,11 @@ static int fill_peer_mac_addr(wmi_csa_event_fixed_param *csa_event,
 				   &mld_addr[0]);
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&csa_event->link_mac_address,
 				   &link_addr[0]);
-
 	wlan_mlo_get_mlpeer_by_peer_mladdr(
 				(struct qdf_mac_addr *)&mld_addr[0],
 				&mldev);
 	if (!mldev) {
-		wma_err("NULL ml dev ctx, link id %d peer mld addr " QDF_MAC_ADDR_FMT " peer link addr " QDF_MAC_ADDR_FMT,
-			csa_event->link_id,
-			QDF_MAC_ADDR_REF(&mld_addr[0]),
-			QDF_MAC_ADDR_REF(&link_addr[0]));
+		wma_err("NULL ml dev ctx");
 		return -EINVAL;
 	}
 
@@ -1616,16 +1624,13 @@ static int fill_peer_mac_addr(wmi_csa_event_fixed_param *csa_event,
 	link_info = mlo_mgr_get_ap_link_by_link_id(mldev,
 						   link_id);
 	if (!link_info) {
-		wma_err("NULL link info, link id %d peer mld addr " QDF_MAC_ADDR_FMT " peer link addr " QDF_MAC_ADDR_FMT,
-			csa_event->link_id,
-			QDF_MAC_ADDR_REF(&mld_addr[0]),
-			QDF_MAC_ADDR_REF(&link_addr[0]));
+		wma_err("NULL link info ");
 		return -EINVAL;
 	}
 
 	qdf_copy_macaddr((struct qdf_mac_addr *)&bssid[0],
 			 &link_info->ap_link_addr);
-	wma_debug("csa event link id %d vdev id %d peer mld addr " QDF_MAC_ADDR_FMT " peer link addr " QDF_MAC_ADDR_FMT " host link info ap_link_addr " QDF_MAC_ADDR_FMT,
+	wma_debug("csa event link id %d vdev id %d peer mld addr" QDF_MAC_ADDR_FMT "peer link addr" QDF_MAC_ADDR_FMT "host link info ap_link_addr" QDF_MAC_ADDR_FMT,
 		  link_id, link_info->vdev_id,
 		  QDF_MAC_ADDR_REF(&mld_addr[0]),
 		  QDF_MAC_ADDR_REF(&link_addr[0]),
@@ -1702,8 +1707,7 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 	peer = wlan_objmgr_get_peer_by_mac(wma->psoc,
 					   bssid, WLAN_LEGACY_WMA_ID);
 	if (!peer) {
-		wma_err("Invalid peer, peer mac addr " QDF_MAC_ADDR_FMT,
-			QDF_MAC_ADDR_REF(&bssid[0]));
+		wma_err("Invalid peer");
 		return -EINVAL;
 	}
 
@@ -1712,24 +1716,20 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma->psoc,
 						    vdev_id,
 						    WLAN_LEGACY_WMA_ID);
-	if (!vdev) {
-		wma_err("NULL vdev, vdev_id %d peer mac addr " QDF_MAC_ADDR_FMT,
-			vdev_id,
-			QDF_MAC_ADDR_REF(&bssid[0]));
+	if (!vdev)
 		return -EINVAL;
-	}
 
 	csa_offload_event = qdf_mem_malloc(sizeof(*csa_offload_event));
 	if (!csa_offload_event) {
 		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
-		goto send_event;
+			return -EINVAL;
 	}
 	if (wlan_cm_is_vdev_roaming(vdev)) {
 		wma_err("Roaming in progress for vdev %d, ignore csa event",
 			 vdev_id);
 		qdf_mem_free(csa_offload_event);
 		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
-		goto send_event;
+		return -EINVAL;
 	}
 
 	qdf_mem_zero(csa_offload_event, sizeof(*csa_offload_event));
@@ -1740,7 +1740,7 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 		wma_err("CSA Event error: No CSA IE present");
 		qdf_mem_free(csa_offload_event);
 		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
-		goto send_event;
+		return -EINVAL;
 	}
 
 	if (csa_event->ies_present_flag & WMI_CSWRAP_IE_EXT_VER_2_PRESENT) {
@@ -1820,16 +1820,11 @@ got_chan:
 		wma_err("CSA Event with channel %d. Ignore !!",
 			 csa_offload_event->channel);
 		qdf_mem_free(csa_offload_event);
-		goto send_event;
+		return -EINVAL;
 	}
 
 	wma_send_msg(wma, WMA_CSA_OFFLOAD_EVENT, (void *)csa_offload_event, 0);
-
 	return 0;
-
-send_event:
-	wlan_mlme_send_csa_event_status_ind(vdev, 0);
-	return -EINVAL;
 }
 
 #ifdef FEATURE_OEM_DATA_SUPPORT
@@ -2645,7 +2640,78 @@ static void wma_log_pkt_icmpv4(uint8_t *data, uint32_t length)
 	wma_debug("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+//add for  connectivity power monitor
+#define RET_ERR  1
+#define RET_OK  0
+#define INIT_FINISHED 1
 
+static struct miscdevice wlan_object;
+static struct work_struct mWork;
+static volatile unsigned char mUeventInit = 0;
+static volatile unsigned char mMiscDevInit = 0;
+static char mUevent[256] = {'\0'};
+
+static void oplusWorkHandler(struct work_struct *data)
+{
+	char *envp[2];
+
+	if (mUevent[0] == '\0')
+		return;
+
+	if ((mMiscDevInit == INIT_FINISHED) && (wlan_object.this_device != NULL)) {
+		envp[0] = mUevent;
+		envp[1] = NULL;
+		kobject_uevent_env(
+			&wlan_object.this_device->kobj,
+			KOBJ_CHANGE, envp);
+	}
+}
+
+int oplusLpmUeventInit(void)
+{
+	int ret = RET_OK;
+
+	INIT_WORK(&mWork, oplusWorkHandler);
+	mUeventInit = INIT_FINISHED;
+	wlan_object.name = "lpm";
+	wlan_object.minor = MISC_DYNAMIC_MINOR;
+	misc_register(&wlan_object);
+	if (wlan_object.this_device != NULL) {
+		ret = kobject_uevent(&wlan_object.this_device->kobj, KOBJ_ADD);
+		if (ret == RET_OK) {
+			mMiscDevInit = INIT_FINISHED;
+		}
+	}
+
+	return RET_OK;
+}
+
+void oplusConnUeventDeinit(void)
+{
+	if (mUeventInit == INIT_FINISHED) {
+		cancel_work_sync(&mWork);
+	}
+	if ((mMiscDevInit == INIT_FINISHED) && (wlan_object.this_device != NULL)) {
+		misc_deregister(&wlan_object);
+	}
+	mUeventInit = 0;
+}
+
+static int oplusLpmSendUevent(const char *src)
+{
+	if (src == NULL) {
+		return RET_ERR;
+	}
+
+	if (mUeventInit == INIT_FINISHED) {
+		strlcpy(mUevent, src, sizeof(mUevent));
+		schedule_work(&mWork);
+	}
+
+	return RET_OK;
+}
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 static void wma_log_pkt_icmpv6(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, seq_num;
@@ -2663,54 +2729,116 @@ static void wma_log_pkt_ipv4(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, src_port, dst_port;
 	char *ip_addr;
-
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+	uint8_t *src_ip;
+	uint8_t *dst_ip;
+	uint8_t poto;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	if (length < WMA_IPV4_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV4_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV4_SRC_ADDR_OFFSET);
+#ifndef OPLUS_CNSS_POWER_DEBUG
 	wma_nofl_debug("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
+#else
+	wma_nofl_alert("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	ip_addr = (char *)(data + IPV4_DST_ADDR_OFFSET);
+#ifndef OPLUS_CNSS_POWER_DEBUG
+	wma_nofl_debug("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+#else
+	wma_nofl_alert("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	wma_nofl_debug("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
 	src_port = *(uint16_t *)(data + IPV4_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV4_DST_PORT_OFFSET);
-	wma_debug("Pkt_len: %u, src_port: %u, dst_port: %u",
-		  qdf_cpu_to_be16(pkt_len),
-		  qdf_cpu_to_be16(src_port),
-		  qdf_cpu_to_be16(dst_port));
+	wma_info("Pkt_len: %u, src_port: %u, dst_port: %u",
+		qdf_cpu_to_be16(pkt_len),
+		qdf_cpu_to_be16(src_port),
+		qdf_cpu_to_be16(dst_port));
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	src_ip = (char *)(data + IPV4_SRC_ADDR_OFFSET);
+	dst_ip = (char *)(data + IPV4_DST_ADDR_OFFSET);
+	poto = qdf_nbuf_data_get_ipv4_proto(data);
+	snprintf(event_msg, sizeof(event_msg), "wakeup_reason=%d;%d.%d.%d.%d;%u;%d.%d.%d.%d;%u;", poto,
+		src_ip[0], src_ip[1], src_ip[2], src_ip[3], qdf_cpu_to_be16(src_port),
+		dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], qdf_cpu_to_be16(dst_port));
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 }
 
 static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, src_port, dst_port;
 	char *ip_addr;
-
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+	uint8_t *src_ip;
+	uint8_t *dst_ip;
+	uint8_t poto;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	if (length < WMA_IPV6_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV6_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV6_SRC_ADDR_OFFSET);
+#ifndef OPLUS_CNSS_POWER_DEBUG
 	wma_nofl_debug("src addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
+#else
+	wma_nofl_alert("src addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	ip_addr = (char *)(data + IPV6_DST_ADDR_OFFSET);
+#ifndef OPLUS_CNSS_POWER_DEBUG
 	wma_nofl_debug("dst addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
+#else
+	wma_nofl_alert("dst addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	src_port = *(uint16_t *)(data + IPV6_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV6_DST_PORT_OFFSET);
 	wma_info("Pkt_len: %u, src_port: %u, dst_port: %u",
 		 qdf_cpu_to_be16(pkt_len),
 		 qdf_cpu_to_be16(src_port),
 		 qdf_cpu_to_be16(dst_port));
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	src_ip = (char *)(data + IPV6_SRC_ADDR_OFFSET);
+	dst_ip = (char *)(data + IPV6_DST_ADDR_OFFSET);
+	poto = qdf_nbuf_data_get_ipv6_proto(data);
+	snprintf(event_msg, sizeof(event_msg), "wakeup_reason=%d;%pI6;%u;%pI6;%u;", poto,
+		src_ip, qdf_cpu_to_be16(src_port),
+		dst_ip, qdf_cpu_to_be16(dst_port));
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 }
 
 static void wma_log_pkt_tcpv4(uint8_t *data, uint32_t length)
@@ -2773,6 +2901,11 @@ static void wma_wow_parse_data_pkt(t_wma_handle *wma,
 	uint8_t *dest_mac;
 	const char *proto_subtype_name;
 	enum qdf_proto_subtype proto_subtype;
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
+
 
 	wma_debug("packet length: %u", length);
 	if (length < QDF_NBUF_TRAC_IPV4_OFFSET)
@@ -2792,6 +2925,12 @@ static void wma_wow_parse_data_pkt(t_wma_handle *wma,
 	if (proto_subtype_name)
 		wma_conditional_log(is_wakeup_event_console_logs_enabled,
 				    "WOW Wakeup: %s rcvd", proto_subtype_name);
+
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	snprintf(event_msg, sizeof(event_msg), "wakeup_package=%s", proto_subtype_name);
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 	switch (proto_subtype) {
 	case QDF_PROTO_EAPOL_M1:
@@ -3746,10 +3885,10 @@ wma_wow_wakeup_pagefault_notify(tp_wma_handle wma, void *ev, uint32_t ev_len)
 		return;
 	}
 
-	cur_time = (qdf_time_t)qdf_get_monotonic_boottime();
+	cur_time = qdf_get_system_uptime();
 	pf_wakeup_intv =
 		wlan_pmo_get_interval_for_pagefault_wakeup_counts(psoc);
-	cutoff_time = cur_time - (qdf_time_t)WMA_MSEC_TO_USEC(pf_wakeup_intv);
+	cutoff_time = cur_time - qdf_system_msecs_to_ticks(pf_wakeup_intv);
 
 	status = wma_wow_pagefault_parse_event(psoc, ev, ev_len, &pf_sym_list);
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -6164,8 +6303,8 @@ int wma_wlan_bt_activity_evt_handler(void *handle, uint8_t *event, uint32_t len)
 		return -EINVAL;
 	}
 
-	wma_debug("Received BT activity event %u",
-		  fixed_param->coex_profile_evt);
+	wma_info("Received BT activity event %u",
+		fixed_param->coex_profile_evt);
 
 	sme_msg.type = eWNI_SME_BT_ACTIVITY_INFO_IND;
 	sme_msg.bodyptr = NULL;
@@ -6295,8 +6434,8 @@ int wma_vdev_obss_detection_info_handler(void *handle, uint8_t *event,
 	return 0;
 }
 
-static void wma_send_set_key_rsp(uint8_t vdev_id, const uint8_t *peer_mac,
-				 bool pairwise, uint8_t key_index)
+static void wma_send_set_key_rsp(uint8_t vdev_id, bool pairwise,
+				 uint8_t key_index)
 {
 	tSetStaKeyParams *key_info_uc;
 	tSetBssKeyParams *key_info_mc;
@@ -6308,13 +6447,14 @@ static void wma_send_set_key_rsp(uint8_t vdev_id, const uint8_t *peer_mac,
 	if (!wma)
 		return;
 
-	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma->psoc, vdev_id,
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma->psoc,
+						    vdev_id,
 						    WLAN_LEGACY_WMA_ID);
 	if (!vdev) {
 		wma_err("VDEV object not found");
 		return;
 	}
-	crypto_key = wlan_crypto_get_key(vdev, peer_mac, key_index);
+	crypto_key = wlan_crypto_get_key(vdev, key_index);
 
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
 	if (!crypto_key) {
@@ -6376,7 +6516,7 @@ void wma_set_peer_ucast_cipher(uint8_t *mac_addr, int32_t uc_cipher,
 }
 
 void wma_update_set_key(uint8_t session_id, bool pairwise,
-			uint8_t key_index, const uint8_t *peer_mac,
+			uint8_t key_index,
 			enum wlan_crypto_cipher_type cipher_type)
 {
 	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
@@ -6394,7 +6534,7 @@ void wma_update_set_key(uint8_t session_id, bool pairwise,
 	if (iface)
 		iface->is_waiting_for_key = false;
 
-	wma_send_set_key_rsp(session_id, peer_mac, pairwise, key_index);
+	wma_send_set_key_rsp(session_id, pairwise, key_index);
 }
 
 int wma_vdev_bss_color_collision_info_handler(void *handle,

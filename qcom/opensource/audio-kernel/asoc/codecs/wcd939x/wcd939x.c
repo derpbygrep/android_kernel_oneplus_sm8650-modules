@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -35,6 +35,21 @@
 #include <linux/soc/qcom/wcd939x-i2c.h>
 #endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+#include "feedback/oplus_audio_kernel_fb.h"
+#ifdef dev_err
+#undef dev_err
+#define dev_err dev_err_fb_delay
+#endif
+#ifdef dev_err_ratelimited
+#undef dev_err_ratelimited
+#define dev_err_ratelimited dev_err_ratelimited_fb_delay
+#endif
+#ifdef pr_err
+#undef pr_err
+#define pr_err pr_err_fb_delay
+#endif
+#endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
 
 #define NUM_SWRS_DT_PARAMS 5
 #define WCD939X_VARIANT_ENTRY_SIZE 32
@@ -53,7 +68,12 @@
 #define XTALK_R_CH_NUM 1
 #define GND_EXT_FET_MARGIN_MOHMS 200
 
+#ifndef OPLUS_ARCH_EXTENDS
+/* add sufficient delay to enumerate wcd tx slave, CR3252303 */
 #define NUM_ATTEMPTS 5
+#else /* OPLUS_ARCH_EXTENDS */
+#define NUM_ATTEMPTS 20
+#endif /* OPLUS_ARCH_EXTENDS */
 #define COMP_MAX_COEFF 25
 #define HPH_MODE_MAX 4
 
@@ -2655,6 +2675,12 @@ static int wcd939x_get_logical_addr(struct swr_device *swr_dev)
 		/* retry after 1ms */
 		usleep_range(1000, 1010);
 		ret = swr_get_logical_dev_num(swr_dev, swr_dev->addr, &devnum);
+#ifdef OPLUS_ARCH_EXTENDS
+/* add sufficient delay to enumerate wcd tx slave, CR3252303 */
+		if (ret) {
+			usleep_range(3000, 3010);
+		}
+#endif /* OPLUS_ARCH_EXTENDS */
 	} while (ret && --num_retry);
 
 	if (ret)
@@ -4665,7 +4691,6 @@ static struct snd_soc_component_driver soc_codec_dev_wcd939x = {
 	.resume = wcd939x_soc_codec_resume,
 };
 
-#if IS_ENABLED(CONFIG_QCOM_WCD_USBSS_I2C)
 static void wcd_usbss_set_ovp_threshold(u32 threshold)
 {
 	uint32_t ovp_regs[2][2] = {{WCD_USBSS_DP_EN, 0x00}, {WCD_USBSS_DN_EN, 0x00}};
@@ -4680,7 +4705,6 @@ static void wcd_usbss_set_ovp_threshold(u32 threshold)
 	/* Write updated register values */
 	wcd_usbss_register_update(ovp_regs, WCD_USBSS_WRITE, ARRAY_SIZE(ovp_regs));
 }
-#endif
 
 static int wcd939x_reset(struct device *dev)
 {
@@ -5029,6 +5053,22 @@ static void wcd939x_dt_parse_usbcss_hs_info(struct device *dev,
 		usbcss_hs->gnd.sbu2.r7 = prop_val;
 		usbcss_hs->gnd.sbu2.r_gnd_par_route1_mohms = prop_val;
 	}
+
+#ifdef OPLUS_ARCH_EXTENDS
+/* Add for tuning headphone digital crosstalk params */
+	parse_xtalk_param(dev, usbcss_hs->xtalk.scale_l, &prop_val,
+			"oplus,usbcss-hs-scale-l");
+	usbcss_hs->xtalk.scale_l = prop_val;
+	parse_xtalk_param(dev, usbcss_hs->xtalk.alpha_l, &prop_val,
+			"oplus,usbcss-hs-alpha-l");
+	usbcss_hs->xtalk.alpha_l = prop_val;
+	parse_xtalk_param(dev, usbcss_hs->xtalk.scale_r, &prop_val,
+			"oplus,usbcss-hs-scale-r");
+	usbcss_hs->xtalk.scale_r = prop_val;
+	parse_xtalk_param(dev, usbcss_hs->xtalk.alpha_r, &prop_val,
+			"oplus,usbcss-hs-alpha-r");
+	usbcss_hs->xtalk.alpha_r = prop_val;
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	/* Compute total resistances */
 	usbcss_hs->gnd.sbu1.r_gnd_par_tot_mohms = usbcss_hs->gnd.sbu1.r_gnd_par_route1_mohms +

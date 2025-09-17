@@ -100,7 +100,6 @@ struct dp_rtpm_tput_policy_context {
  * @enable_tcp_delack: enable Dynamic Configuration of Tcp Delayed Ack
  * @enable_tcp_limit_output: enable TCP limit output
  * @enable_tcp_adv_win_scale: enable  TCP adv window scaling
- * @tcp_adv_win_scl_disc_lvl_low: Set TCP adv win scale level LOW on disconnect
  * @tcp_delack_thres_high: High Threshold inorder to trigger TCP Del Ack
  * indication
  * @tcp_delack_thres_low: Low Threshold inorder to trigger TCP Del Ack
@@ -165,7 +164,6 @@ struct wlan_dp_psoc_cfg {
 	uint32_t enable_tcp_delack;
 	bool     enable_tcp_limit_output;
 	uint32_t enable_tcp_adv_win_scale;
-	bool tcp_adv_win_scl_disc_lvl_low;
 	uint32_t tcp_delack_thres_high;
 	uint32_t tcp_delack_thres_low;
 	uint32_t tcp_tx_high_tput_thres;
@@ -711,8 +709,10 @@ struct wlan_dp_intf {
  * @vdev_lock: vdev spin lock
  * @conn_info: STA connection information
  * @destroyed: flag to indicate dp_link destroyed (logical delete)
+ * @cdp_vdev_registered: flag to indicate if corresponding CDP vdev
+ *			 is registered
+ * @cdp_vdev_deleted: flag to indicate if corresponding CDP vdev is deleted
  * @inactive_list_elem: list node for membership in dp link inactive list
- * @cdp_vdev_list: cdp_vdev list to which the dp_link is registered
  */
 struct wlan_dp_link {
 	qdf_list_node_t node;
@@ -724,8 +724,9 @@ struct wlan_dp_link {
 	qdf_spinlock_t vdev_lock;
 	struct wlan_dp_conn_info conn_info;
 	uint8_t destroyed;
+	uint8_t cdp_vdev_registered;
+	uint8_t	cdp_vdev_deleted;
 	TAILQ_ENTRY(wlan_dp_link) inactive_list_elem;
-	TAILQ_HEAD(, cdp_vdev) cdp_vdev_list;
 };
 
 /**

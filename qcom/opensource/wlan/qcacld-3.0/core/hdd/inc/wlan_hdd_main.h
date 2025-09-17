@@ -2398,7 +2398,25 @@ struct hdd_channel_info {
 	u_int8_t vht_center_freq_seg0;
 	u_int8_t vht_center_freq_seg1;
 };
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+enum wlan_hostdriver_loadstatus {
+	INSMOD_SUCCESS = 1,
+	INSMOD_FAIL,
+	RMMOD_SUCCESS,
+	RMMOD_FAIL,
+	INI_PRASE_SUCCESS,
+	INI_PRASE_FAIL,
+};
 
+struct wlan_hostdriver_loadresult {
+	u_int8_t insmod_status;
+	u_int8_t rmmod_status;
+	u_int8_t ini_prase_status;
+};
+
+void wlan_driver_send_uevent(char *enable);
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 /**
  * struct hdd_chwidth_info - channel width related info
  * @sir_chwidth_valid: If nl_chan_width is valid in Sir
@@ -5488,6 +5506,11 @@ static inline void wlan_hdd_link_speed_update(struct wlan_objmgr_psoc *psoc,
 {}
 #endif
 
+//#ifdef OPLUS_FEATURE_WIFI_WSA
+//Add for STBC&MRC
+int send_oplus_uevent(const char *src);
+//#endif OPLUS_FEATURE_WIFI_WSA
+
 /**
  * hdd_update_multicast_list() - update the multicast list
  * @vdev: pointer to VDEV object
@@ -5566,29 +5589,4 @@ hdd_lpc_is_work_scheduled(struct hdd_context *hdd_ctx)
  */
 bool hdd_allow_new_intf(struct hdd_context *hdd_ctx,
 			enum QDF_OPMODE mode);
-
-#ifdef WLAN_FEATURE_11BE_MLO_ADV_FEATURE
-/**
- * wlan_hdd_is_link_switch_in_progress() - Function to check if there is any
- * link switch in progress
- * @link_info: Link info pointer in HDD adapter
- *
- * Return: true if link switch in progress, false otherwise
- */
-bool wlan_hdd_is_link_switch_in_progress(struct wlan_hdd_link_info *link_info);
-#else
-static inline bool
-wlan_hdd_is_link_switch_in_progress(struct wlan_hdd_link_info *link_info)
-{
-	return false;
-}
-#endif
-
-/**
- * wlan_hdd_is_mlo_connection() - Check if connection is legacy or mlo
- * @link_info: Link info pointer in HDD adapter
- *
- * Return: True if MLO connection, else False
- */
-bool wlan_hdd_is_mlo_connection(struct wlan_hdd_link_info *link_info);
 #endif /* end #if !defined(WLAN_HDD_MAIN_H) */

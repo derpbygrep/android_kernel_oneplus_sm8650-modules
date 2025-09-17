@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -98,7 +98,6 @@
 #define CDP_DP_RX_FISA_STATS	   26
 #define CDP_DP_SWLM_STATS	   27
 #define CDP_DP_TX_HW_LATENCY_STATS 28
-#define CDP_TXRX_SOC_STATS	   30
 
 #define WME_AC_TO_TID(_ac) (       \
 		((_ac) == WME_AC_VO) ? 6 : \
@@ -1137,15 +1136,6 @@ typedef QDF_STATUS(*ol_txrx_get_tsf_time)(void *osif_dev, uint64_t input_time,
 					  uint64_t *tsf_time);
 
 /**
- * typedef ol_txrx_vdev_del_notify_cb ()- callback registered to notify when
- *					  cdp vdev is detached.
- * @context: osif vdev handle
- * @cdp_vdev: CDP vdev handle
- */
-typedef void (*ol_txrx_vdev_del_notify_cb)(ol_osif_vdev_handle context,
-					   struct cdp_vdev *cdp_vdev);
-
-/**
  * struct ol_txrx_ops - (pointers to) the functions used for tx and rx
  * data xfer
  *
@@ -1238,7 +1228,7 @@ struct ol_txrx_ops {
 
 	ol_txrx_get_key_fp  get_key;
 	ol_txrx_get_tsf_time get_tsf_time;
-	ol_txrx_vdev_del_notify_cb vdev_del_notify;
+	ol_txrx_vdev_delete_cb vdev_del_notify;
 };
 
 /**

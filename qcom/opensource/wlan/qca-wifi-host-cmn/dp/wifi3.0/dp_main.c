@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -4947,17 +4947,17 @@ static inline void dp_vdev_fetch_tx_handler(struct dp_vdev *vdev,
  *
  * Return: DP VDEV handle on success, NULL on failure
  */
-static struct cdp_vdev *
-dp_vdev_register_wifi3(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
-		       ol_osif_vdev_handle osif_vdev,
-		       struct ol_txrx_ops *txrx_ops)
+static QDF_STATUS dp_vdev_register_wifi3(struct cdp_soc_t *soc_hdl,
+					 uint8_t vdev_id,
+					 ol_osif_vdev_handle osif_vdev,
+					 struct ol_txrx_ops *txrx_ops)
 {
 	struct dp_soc *soc = cdp_soc_t_to_dp_soc(soc_hdl);
 	struct dp_vdev *vdev =	dp_vdev_get_ref_by_id(soc, vdev_id,
 						      DP_MOD_ID_CDP);
 
 	if (!vdev)
-		return NULL;
+		return QDF_STATUS_E_FAILURE;
 
 	vdev->osif_vdev = osif_vdev;
 	vdev->osif_rx = txrx_ops->rx.rx;
@@ -4993,8 +4993,7 @@ dp_vdev_register_wifi3(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
 	dp_init_info("%pK: DP Vdev Register success", soc);
 
 	dp_vdev_unref_delete(soc, vdev, DP_MOD_ID_CDP);
-
-	return (struct cdp_vdev *)vdev;
+	return QDF_STATUS_SUCCESS;
 }
 
 #ifdef WLAN_FEATURE_11BE_MLO
@@ -5334,30 +5333,6 @@ static QDF_STATUS dp_vdev_detach_wifi3(struct cdp_soc_t *cdp_soc,
 	return QDF_STATUS_SUCCESS;
 }
 
-#if defined(WLAN_MAX_PDEVS) && (WLAN_MAX_PDEVS == 1)
-/**
- * is_dp_no_unmap_peer_reuse_allow() - check if peer has not received HTT
- *                                     unmap before, not allow to reuse
- * @peer: DP peer handle to be checked
- *
- * Return: true - allowed, false - not
- */
-static inline
-bool is_dp_no_unmap_peer_reuse_allow(struct dp_peer *peer)
-{
-	if (peer->peer_id == HTT_INVALID_PEER)
-		return true;
-	else
-		return false;
-}
-#else
-static inline
-bool is_dp_no_unmap_peer_reuse_allow(struct dp_peer *peer)
-{
-	return true;
-}
-#endif
-
 #ifdef WLAN_FEATURE_11BE_MLO
 /**
  * is_dp_peer_can_reuse() - check if the dp_peer match condition to be reused
@@ -5376,7 +5351,6 @@ bool is_dp_peer_can_reuse(struct dp_vdev *vdev,
 {
 	if (peer->bss_peer && (peer->vdev == vdev) &&
 	    (peer->peer_type == peer_type) &&
-	    is_dp_no_unmap_peer_reuse_allow(peer) &&
 	    (qdf_mem_cmp(peer_mac_addr, peer->mac_addr.raw,
 			 QDF_MAC_ADDR_SIZE) == 0))
 		return true;
@@ -5391,7 +5365,6 @@ bool is_dp_peer_can_reuse(struct dp_vdev *vdev,
 			  enum cdp_peer_type peer_type)
 {
 	if (peer->bss_peer && (peer->vdev == vdev) &&
-	    is_dp_no_unmap_peer_reuse_allow(peer) &&
 	    (qdf_mem_cmp(peer_mac_addr, peer->mac_addr.raw,
 			 QDF_MAC_ADDR_SIZE) == 0))
 		return true;
@@ -6367,7 +6340,7 @@ void dp_vdev_unref_delete(struct dp_soc *soc, struct dp_vdev *vdev,
 {
 	ol_txrx_vdev_delete_cb vdev_delete_cb = NULL;
 	void *vdev_delete_context = NULL;
-	ol_txrx_vdev_del_notify_cb vdev_del_notify = NULL;
+	ol_txrx_vdev_delete_cb vdev_del_notify = NULL;
 	void *vdev_del_noitfy_ctx = NULL;
 	uint8_t vdev_id = vdev->vdev_id;
 	struct dp_pdev *pdev = vdev->pdev;
@@ -6430,15 +6403,14 @@ free_vdev:
 				     vdev);
 	wlan_minidump_remove(vdev, sizeof(*vdev), soc->ctrl_psoc,
 			     WLAN_MD_DP_VDEV, "dp_vdev");
-
-	if (vdev_del_notify)
-		vdev_del_notify(vdev_del_noitfy_ctx, (struct cdp_vdev *)vdev);
-
 	qdf_mem_free(vdev);
 	vdev = NULL;
 
 	if (vdev_delete_cb)
 		vdev_delete_cb(vdev_delete_context);
+
+	if (vdev_del_notify)
+		vdev_del_notify(vdev_del_noitfy_ctx);
 }
 
 qdf_export_symbol(dp_vdev_unref_delete);
@@ -10338,10 +10310,6 @@ static QDF_STATUS dp_txrx_dump_stats(struct cdp_soc_t *psoc, uint16_t value,
 
 	case CDP_DP_TX_HW_LATENCY_STATS:
 		dp_pdev_print_tx_delay_stats(soc);
-		break;
-
-	case CDP_TXRX_SOC_STATS:
-		dp_print_txrx_soc_stats(soc);
 		break;
 
 	default:

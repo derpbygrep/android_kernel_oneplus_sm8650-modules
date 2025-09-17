@@ -6,9 +6,6 @@ else
 	KERNEL_BUILD := n
 endif
 
-# Force user build
-TARGET_BUILD_VARIANT := user
-
 ifeq ($(KERNEL_BUILD), y)
 	# These are provided in external module based builds
 	# Need to explicitly define for Kernel-based builds
@@ -24,9 +21,10 @@ WLAN_COMMON_ROOT ?= cmn
 WLAN_COMMON_INC ?= $(WLAN_ROOT)/$(WLAN_COMMON_ROOT)
 WLAN_FW_API ?= $(WLAN_ROOT)/../fw-api/
 WLAN_PROFILE ?= default
+CONFIG_QCA_CLD_WLAN_PROFILE ?= $(WLAN_PROFILE)
 DEVNAME ?= wlan
 WLAN_PLATFORM_INC ?= $(WLAN_ROOT)/../platform/inc
-DATA_IPA_INC ?= $(WLAN_ROOT)/../../dataipa/drivers/platform/msm/include
+DATA_IPA_INC ?= $(WLAN_ROOT)/../dataipa/drivers/platform/msm/include
 DATA_IPA_UAPI_INC ?= $(DATA_IPA_INC)/uapi
 
 ifeq ($(KERNEL_BUILD), n)
@@ -142,6 +140,11 @@ HDD_OBJS := 	$(HDD_SRC_DIR)/wlan_hdd_assoc.o \
 		$(HDD_SRC_DIR)/wlan_hdd_wmm.o \
 		$(HDD_SRC_DIR)/wlan_hdd_wowl.o\
 		$(HDD_SRC_DIR)/wlan_hdd_ll_lt_sap.o\
+
+
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_WIFI_OPLUSWFD_SMARTMCC
+HDD_OBJS +=	$(HDD_SRC_DIR)/wlan_oplus_smartmcc.o
+### End
 
 ifeq ($(CONFIG_UNIT_TEST), y)
 HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_unit_test.o
@@ -1275,7 +1278,7 @@ FTM_OBJS := $(FTM_DISP_SRC)/wlan_ftm_init_deinit.o \
 	    $(FTM_CORE_SRC)/wlan_ftm_svc.o \
 	    $(TARGET_IF_FTM_SRC)/target_if_ftm.o
 
-ifeq ($(CONFIG_QCA_WIFI_FTM_NL80211), y)
+ifeq ($(QCA_WIFI_FTM_NL80211), y)
 FTM_OBJS += $(OS_IF_FTM_SRC)/wlan_cfg80211_ftm.o
 endif
 
@@ -2205,12 +2208,12 @@ DP_OBJS += $(DP_SRC)/be/dp_be_tx.o
 DP_OBJS += $(DP_SRC)/be/dp_be_rx.o
 
 ifeq ($(CONFIG_WIFI_MONITOR_SUPPORT), y)
-ifeq ($(CONFIG_WLAN_TX_MON_2_0_Y_WLAN_DP_LOCAL_PKT_CAPTURE), y)
+ifeq ($(CONFIG_WLAN_TX_MON_2_0), y)
 DP_OBJS += $(DP_SRC)/monitor/2.0/dp_mon_2.0.o \
 		$(DP_SRC)/monitor/2.0/dp_mon_filter_2.0.o
 DP_OBJS += $(DP_SRC)/monitor/2.0/dp_tx_mon_2.0.o \
 		$(DP_SRC)/monitor/2.0/dp_tx_mon_status_2.0.o
-ccflags-$(CONFIG_WLAN_TX_MON_2_0_Y_WLAN_DP_LOCAL_PKT_CAPTURE) += -DWLAN_PKT_CAPTURE_TX_2_0
+ccflags-$(CONFIG_WLAN_TX_MON_2_0) += -DWLAN_PKT_CAPTURE_TX_2_0
 ccflags-y += -DWLAN_TX_PKT_CAPTURE_ENH_BE
 ccflags-y += -DQDF_FRAG_CACHE_SUPPORT
 endif
@@ -2614,6 +2617,21 @@ WLAN_DP_COMP_OBJS := $(DP_COMP_CORE_DIR)/wlan_dp_main.o \
 		 $(DP_COMP_CORE_DIR)/wlan_dp_txrx.o \
 		 $(DP_COMP_TGT_DIR)/target_if_dp_comp.o
 
+#ifdef OPLUS_FEATURE_WIFI_MAC
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_WIFI_MAC
+#endif /* OPLUS_FEATURE_WIFI_MAC */
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_CONN_POWER_MONITOR
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_WIFI_DCS_SWITCH
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+#ifdef OPLUS_FEATURE_WIFI_SIGNAL
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_WIFI_SIGNAL
+#endif /* OPLUS_FEATURE_WIFI_SIGNAL */
+#ifdef OPLUS_FEATURE_WIFI_SWITCH
+KBUILD_CPPFLAGS += -DOPLUS_CNSS_POWER_DEBUG
+#endif /* OPLUS_FEATURE_WIFI_SWITCH */
 ifeq ($(CONFIG_WLAN_LRO), y)
 WLAN_DP_COMP_OBJS += $(DP_COMP_OS_IF_DIR)/os_if_dp_lro.o
 endif
@@ -2633,11 +2651,11 @@ endif
 ifeq (y,$(filter y,$(CONFIG_LITHIUM) $(CONFIG_BERYLLIUM) $(CONFIG_RHINE)))
 WLAN_DP_COMP_OBJS += $(DP_COMP_CORE_DIR)/wlan_dp_prealloc.o
 
-ifeq ($(CONFIG_WLAN_TX_MON_2_0_Y_WLAN_DP_LOCAL_PKT_CAPTURE), y)
+ifeq ($(CONFIG_WLAN_TX_MON_2_0), y)
 ifeq ($(CONFIG_WLAN_DP_LOCAL_PKT_CAPTURE), y)
 WLAN_DP_COMP_OBJS += $(DP_COMP_OS_IF_DIR)/os_if_dp_local_pkt_capture.o
 endif #CONFIG_WLAN_DP_LOCAL_PKT_CAPTURE
-endif #CONFIG_WLAN_TX_MON_2_0_Y_WLAN_DP_LOCAL_PKT_CAPTURE
+endif #CONFIG_WLAN_TX_MON_2_0
 endif
 
 ifeq ($(CONFIG_WLAN_FEATURE_DP_RX_THREADS), y)
@@ -3011,14 +3029,11 @@ HAL_OBJS +=	$(WLAN_COMMON_ROOT)/$(HAL_DIR)/wifi3.0/be/hal_be_generic_api.o
 
 HAL_OBJS +=	$(WLAN_COMMON_ROOT)/$(HAL_DIR)/wifi3.0/be/hal_be_reo.o \
 
-ifeq (y,$(findstring y,$(CONFIG_INCLUDE_HAL_PEACH)))
-HAL_INC += -I$(WLAN_COMMON_INC)/$(HAL_DIR)/wifi3.0/peach
-HAL_OBJS += $(WLAN_COMMON_ROOT)/$(HAL_DIR)/wifi3.0/peach/hal_peach.o
-ccflags-y += -DINCLUDE_HAL_PEACH
-else ifeq (y,$(findstring y,$(CONFIG_INCLUDE_HAL_KIWI)))
+ifeq (y,$(findstring y,$(CONFIG_CNSS_KIWI) $(CONFIG_CNSS_KIWI_V2) $(CONFIG_CNSS_PEACH)))
 HAL_INC += -I$(WLAN_COMMON_INC)/$(HAL_DIR)/wifi3.0/kiwi
 HAL_OBJS += $(WLAN_COMMON_ROOT)/$(HAL_DIR)/wifi3.0/kiwi/hal_kiwi.o
-ccflags-y += -DINCLUDE_HAL_KIWI
+else
+#error "Not Beryllium"
 endif
 
 endif #### CONFIG_BERYLLIUM ####
@@ -4701,13 +4716,6 @@ CONFIG_WLAN_MAX_ML_BSS_LINKS ?= 1
 endif
 ccflags-y += -DWLAN_MAX_ML_BSS_LINKS=$(CONFIG_WLAN_MAX_ML_BSS_LINKS)
 
-ifdef CONFIG_WLAN_FEATURE_EMLSR
-CONFIG_WLAN_EMLSR_ENABLE ?= 1
-else
-CONFIG_WLAN_EMLSR_ENABLE ?= 0
-endif
-ccflags-y += -DWLAN_EMLSR_ENABLE=$(CONFIG_WLAN_EMLSR_ENABLE)
-
 #Maximum pending commands for a vdev is calculated in vdev create handler
 #by WLAN_SER_MAX_PENDING_CMDS/WLAN_SER_MAX_VDEVS. For SAP case, we will need
 #to accommodate 32 Pending commands to handle multiple STA sending
@@ -5044,6 +5052,19 @@ endif
 ifeq ($(CONFIG_ARCH_PINEAPPLE), y)
 ccflags-y += -gdwarf-4
 endif
+
+#ifdef OPLUS_BUG_STABILITY
+#Modify for: enable macro OPLUS_BUG_STABILITY for some bug fix
+ccflags-y +=   -DOPLUS_BUG_STABILITY
+#endif
+
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_SOFTAP_DCS_SWITCH
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+KBUILD_CPPFLAGS += -DOPLUS_FEATURE_WIFI_VENDOR_FT
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 
 # Module information used by KBuild framework
 obj-$(CONFIG_QCA_CLD_WLAN) += $(MODNAME).o

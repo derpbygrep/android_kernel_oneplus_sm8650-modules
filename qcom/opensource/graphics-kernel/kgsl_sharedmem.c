@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -17,6 +17,10 @@
 #include "kgsl_pool.h"
 #include "kgsl_reclaim.h"
 #include "kgsl_sharedmem.h"
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
+#include <mm/mm_osvelte/common.h>
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE */
 
 /*
  * The user can set this from debugfs to force failed memory allocations to
@@ -1529,7 +1533,6 @@ void kgsl_free_secure_page(struct page *page)
 {
 	struct sg_table sgt;
 	struct scatterlist sgl;
-	int ret;
 
 	if (!page)
 		return;
@@ -1540,16 +1543,8 @@ void kgsl_free_secure_page(struct page *page)
 	sg_init_table(&sgl, 1);
 	sg_set_page(&sgl, page, PAGE_SIZE, 0);
 
-	ret = kgsl_unlock_sgt(&sgt);
-	if (ret)
-		/*
-		 * Unlock of the secure page failed. This page will be
-		 * stuck in secure side forever and is unrecoverable.
-		 * Give up on this page and don't free it.
-		 */
-		pr_err("kgsl_unlock_sgt failed ret %d\n", ret);
-	else
-		__free_page(page);
+	kgsl_unlock_sgt(&sgt);
+	__free_page(page);
 }
 
 struct page *kgsl_alloc_secure_page(void)
@@ -1624,12 +1619,13 @@ static int kgsl_system_alloc_pages(struct kgsl_memdesc *memdesc, struct page ***
 	struct page **local;
 	int i, npages = memdesc->size >> PAGE_SHIFT;
 
-	local = kvcalloc(npages, sizeof(*pages), GFP_KERNEL);
+	local = kvcalloc(npages, sizeof(*pages), GFP_KERNEL | __GFP_NORETRY);
 	if (!local)
 		return -ENOMEM;
 
 	for (i = 0; i < npages; i++) {
-		gfp_t gfp = __GFP_ZERO | __GFP_HIGHMEM | GFP_KERNEL;
+		gfp_t gfp = __GFP_ZERO | __GFP_HIGHMEM |
+			GFP_KERNEL | __GFP_NORETRY;
 
 		if (!fatal_signal_pending(current))
 			local[i] = alloc_pages(gfp, get_order(PAGE_SIZE));
@@ -1979,3 +1975,35 @@ void kgsl_free_globals(struct kgsl_device *device)
 		kfree(md);
 	}
 }
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
+void dump_kgsl_process_mem_detail(struct kgsl_process_private *priv)
+{
+    int i = 0;
+    int id = 0;
+    struct kgsl_mem_entry *entry = NULL;
+    uint64_t memtype_detail[KGSL_MEMTYPE_KERNEL + 1] = {0};
+    spin_lock(&priv->mem_lock);
+    for (entry = idr_get_next(&priv->mem_idr, &id); entry;
+        id++, entry = idr_get_next(&priv->mem_idr, &id)) {
+        struct kgsl_memdesc *memdesc;
+        unsigned int type;
+        if (!kgsl_mem_entry_get(entry))
+            continue;
+        spin_unlock(&priv->mem_lock);
+        memdesc = &entry->memdesc;
+        type = kgsl_memdesc_get_memtype(memdesc);
+        if (type <= KGSL_MEMTYPE_KERNEL)
+            memtype_detail[type] += memdesc->size;
+        kgsl_mem_entry_put(entry);
+        spin_lock(&priv->mem_lock);
+    }
+    spin_unlock(&priv->mem_lock);
+    osvelte_info("%-16s %-5s \n", "memtype", "size");
+    for (i = 0; i <= KGSL_MEMTYPE_KERNEL; i++) {
+        if (memtype_detail[i] > 0) {
+            osvelte_info("%-16d %-5llu\n", i, memtype_detail[i] / SZ_1K);
+        }
+    }
+}
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE */

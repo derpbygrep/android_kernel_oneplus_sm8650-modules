@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -964,8 +964,8 @@ static inline void hal_rx_print_pn_be(uint8_t *buf)
 	uint32_t pn_95_64 = HAL_RX_TLV_MPDU_PN_95_64_GET(rx_pkt_tlvs);
 	uint32_t pn_127_96 = HAL_RX_TLV_MPDU_PN_127_96_GET(rx_pkt_tlvs);
 
-	hal_err_rl("pn_127_96 0x%x pn_95_64 0x%x pn_63_32 0x%x pn_31_0 0x%x",
-		   pn_127_96, pn_95_64, pn_63_32, pn_31_0);
+	hal_debug("PN number pn_127_96 0x%x pn_95_64 0x%x pn_63_32 0x%x pn_31_0 0x%x",
+		  pn_127_96, pn_95_64, pn_63_32, pn_31_0);
 }
 
 static inline void hal_rx_tlv_get_pn_num_be(uint8_t *buf, uint64_t *pn_num)
@@ -1233,8 +1233,8 @@ static inline void hal_rx_print_pn_be(uint8_t *buf)
 	uint32_t pn_63_32 = HAL_RX_TLV_MPDU_PN_63_32_GET(rx_pkt_tlvs);
 	uint32_t pn_95_64 = HAL_RX_TLV_MPDU_PN_95_64_GET(rx_pkt_tlvs);
 
-	hal_err_rl("PN number pn_95_64 0x%x pn_63_32 0x%x pn_31_0 0x%x",
-		   pn_95_64, pn_63_32, pn_31_0);
+	hal_debug("PN number pn_95_64 0x%x pn_63_32 0x%x pn_31_0 0x%x",
+		  pn_95_64, pn_63_32, pn_31_0);
 }
 
 static inline void hal_rx_tlv_get_pn_num_be(uint8_t *buf, uint64_t *pn_num)

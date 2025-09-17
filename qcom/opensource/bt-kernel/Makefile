@@ -4,14 +4,7 @@ M ?= $(shell pwd)
 M=$(PWD)
 BT_ROOT=$(KERNEL_SRC)/$(M)
 
-KBUILD_OPTIONS += BT_ROOT=$(BT_ROOT)
-KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
-KBUILD_OPTIONS += CONFIG_BT_HW_SECURE_DISABLE=y
-KBUILD_OPTIONS += CONFIG_BTFM_SLIM=m
-KBUILD_OPTIONS += CONFIG_MSM_BT_POWER=m
-KBUILD_EXTRA_SYMBOLS := \
-    $(OUT_DIR)/../sm8650-modules/qcom/opensource/securemsm-kernel/Module.symvers \
-    $(OUT_DIR)/../sm8650-modules/qcom/opensource/wlan/platform/Module.symvers
+KBUILD_OPTIONS+=  BT_ROOT=$(BT_ROOT)
 
 all:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) modules $(KBUILD_OPTIONS)

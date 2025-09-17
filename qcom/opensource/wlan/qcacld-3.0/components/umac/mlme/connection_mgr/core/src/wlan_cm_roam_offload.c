@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -314,7 +314,6 @@ cm_roam_bss_load_config(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	params->vdev_id = vdev_id;
 	wlan_mlme_get_bss_load_threshold(psoc, &params->bss_load_threshold);
 	wlan_mlme_get_bss_load_sample_time(psoc, &params->bss_load_sample_time);
-	wlan_mlme_get_bss_load_alpha(psoc, &params->bss_load_alpha);
 	wlan_mlme_get_bss_load_rssi_threshold_6ghz(
 					psoc, &params->rssi_threshold_6ghz);
 	wlan_mlme_get_bss_load_rssi_threshold_5ghz(
@@ -6063,7 +6062,6 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 	/* Ignore BSSID and channel validation for FW host roam */
 	if (source == CM_ROAMING_FW)
 		goto send_evt;
-
 	if (source == CM_ROAMING_LINK_REMOVAL) {
 		cm_req->roam_req.req.forced_roaming = true;
 		goto send_evt;
@@ -6451,12 +6449,6 @@ void cm_roam_trigger_info_event(struct wmi_roam_trigger_info *data,
 				break;
 			}
 		}
-	} else if (data->current_rssi) {
-		/* Reassoc reject case */
-		wlan_diag_event.rssi = (-1) * data->current_rssi;
-		wlan_diag_event.rssi_thresh =
-				(-1) * data->rssi_trig_data.threshold;
-		wlan_diag_event.cu = scan_data->ap[0].cu_load;
 	}
 
 	if (data->trigger_reason == ROAM_TRIGGER_REASON_PERIODIC ||
@@ -6674,8 +6666,7 @@ void cm_roam_result_info_event(struct wlan_objmgr_psoc *psoc,
 	    res->fail_reason ==
 		ROAM_FAIL_REASON_NO_CAND_AP_FOUND_AND_FINAL_BMISS_SENT ||
 	    res->fail_reason ==
-		ROAM_FAIL_REASON_NO_AP_FOUND_AND_FINAL_BMISS_SENT ||
-	    res->fail_reason == ROAM_FAIL_REASON_MLD_EXTRA_SCAN_REQUIRED)
+		ROAM_FAIL_REASON_NO_AP_FOUND_AND_FINAL_BMISS_SENT)
 		wlan_diag_event.is_roam_successful = false;
 
 	for (i = 0; i < scan_data->num_ap; i++) {
@@ -6799,102 +6790,6 @@ cm_find_roam_candidate(struct wlan_objmgr_pdev *pdev,
 	return QDF_STATUS_SUCCESS;
 }
 
-#if (defined(CONNECTIVITY_DIAG_EVENT) && defined(WLAN_FEATURE_ROAM_OFFLOAD))
-/**
- * cm_roam_reject_reassoc_event() - Send connectivity diag log
- * event while rejecting reassoc request to connected BSSID
- * @psoc: Pointer to PSOC object
- * @vdev: Pointer to vdev object
- * @bssid: connected BSSID
- *
- * Return: None
- */
-static inline void
-cm_roam_reject_reassoc_event(struct wlan_objmgr_psoc *psoc,
-			     struct wlan_objmgr_vdev *vdev,
-			     struct qdf_mac_addr *bssid)
-{
-	uint8_t vdev_id;
-	struct wmi_roam_trigger_info *trigger_data;
-	struct wmi_roam_scan_data *scan_data;
-	struct cm_roam_values_copy rssi_threshold = {0};
-	struct wlan_channel *bss_chan;
-	struct scan_cache_entry *entry;
-	int8_t rssi = 0;
-
-	vdev_id = wlan_vdev_get_id(vdev);
-
-	/*
-	 * Send roam scan start and roam cancelled for rejecting
-	 * reassoc command received for roaming to already
-	 * connected bssid.
-	 */
-	trigger_data = qdf_mem_malloc(sizeof(*trigger_data));
-	if (!trigger_data)
-		return;
-
-	scan_data = qdf_mem_malloc(sizeof(*scan_data));
-	if (!scan_data) {
-		qdf_mem_free(trigger_data);
-		return;
-	}
-
-	/*
-	 * Parameters to be sent:
-	 * -> Roam scan start event:
-	 *    1. Reason = User triggered
-	 *    2. RSSI
-	 *    3. CU
-	 *    4. full_scan
-	 *    5. RSSI Threshold
-	 *
-	 * -> Roam cancel Event:
-	 *  1. vdev_id
-	 *  2. Reason code value
-	 *  3. Reason code string
-	 */
-	trigger_data->present = true;
-	trigger_data->trigger_reason = ROAM_TRIGGER_REASON_FORCED;
-
-	/* Get RSSI from scan entry */
-	cm_get_rssi_snr_by_bssid(wlan_vdev_get_pdev(vdev), bssid, &rssi, NULL);
-	trigger_data->current_rssi = qdf_abs(rssi);
-
-	/* Get RSSI threshold configuration from RSO config */
-	wlan_cm_roam_cfg_get_value(psoc, vdev_id, NEIGHBOUR_LOOKUP_THRESHOLD,
-				   &rssi_threshold);
-	trigger_data->rssi_trig_data.threshold = rssi_threshold.uint_value;
-
-	/* Get CU load info from QBSS Load IE in scan entry */
-	entry = wlan_scan_get_entry_by_bssid(wlan_vdev_get_pdev(vdev), bssid);
-	if (entry)
-		scan_data->ap[0].cu_load = entry->qbss_chan_load;
-	else
-		scan_data->ap[0].cu_load = 0;
-
-	/* Fill the band info from operating channel */
-	bss_chan = wlan_vdev_mlme_get_bss_chan(vdev);
-	if (bss_chan)
-		scan_data->band =
-			wlan_convert_freq_to_diag_band(bss_chan->ch_freq);
-	else
-		mlme_debug("vdev:%d bss_chan is null", vdev_id);
-
-	cm_roam_trigger_info_event(trigger_data, scan_data, vdev_id, false);
-
-	qdf_mem_free(trigger_data);
-	qdf_mem_free(scan_data);
-
-	cm_roam_cancel_event(vdev_id, ROAM_FAIL_REASON_REASSOC_TO_SAME_AP, 0);
-}
-#else
-static inline void
-cm_roam_reject_reassoc_event(struct wlan_objmgr_psoc *psoc,
-			     struct wlan_objmgr_vdev *vdev,
-			     struct qdf_mac_addr *bssid)
-{}
-#endif
-
 QDF_STATUS
 cm_send_roam_invoke_req(struct cnx_mgr *cm_ctx, struct cm_req *req)
 {
@@ -6939,21 +6834,10 @@ cm_send_roam_invoke_req(struct cnx_mgr *cm_ctx, struct cm_req *req)
 
 	wlan_vdev_get_bss_peer_mac(cm_ctx->vdev, &connected_bssid);
 	wlan_mlme_get_self_bss_roam(psoc, &enable_self_bss_roam);
-	if ((!enable_self_bss_roam ||
-	     cm_roam_get_roam_score_algo(psoc) == VENDOR_ROAM_SCORE_ALGORITHM_1) &&
-	     qdf_is_macaddr_equal(&roam_req->req.bssid, &connected_bssid)) {
-		mlme_err(CM_PREFIX_FMT "self bss roam disabled. invoke_src:%d",
-			 CM_PREFIX_REF(vdev_id, cm_id),
-			 req->roam_req.req.source);
-		/*
-		 * Send roam cancel event when roam invoke triggered by
-		 * userspace reassoc command is rejected
-		 */
-		if (req->roam_req.req.source == CM_ROAMING_USER ||
-		    req->roam_req.req.source == CM_ROAMING_HOST)
-			cm_roam_reject_reassoc_event(psoc, cm_ctx->vdev,
-						     &connected_bssid);
-
+	if (!enable_self_bss_roam &&
+	    qdf_is_macaddr_equal(&roam_req->req.bssid, &connected_bssid)) {
+		mlme_err(CM_PREFIX_FMT "self bss roam disabled",
+			 CM_PREFIX_REF(vdev_id, cm_id));
 		status = QDF_STATUS_E_FAILURE;
 		goto roam_err;
 	}
@@ -7367,86 +7251,6 @@ wlan_convert_bitmap_to_band(uint8_t bitmap)
 	return band;
 }
 
-#ifdef WLAN_FEATURE_11BE_MLO
-
-static enum wlan_diag_wifi_band
-wlan_convert_reg_to_diag_band(enum reg_wifi_band band)
-{
-	switch (band) {
-	case REG_BAND_2G:
-		return WLAN_24GHZ_BAND;
-	case REG_BAND_5G:
-		return WLAN_5GHZ_BAND;
-	case REG_BAND_6G:
-		return WLAN_6GHZ_BAND;
-	default:
-		return WLAN_INVALID_BAND;
-	}
-}
-
-QDF_STATUS
-cm_roam_mlo_setup_event(struct wlan_objmgr_vdev *vdev,
-			struct roam_frame_info *frame_data,
-			struct roam_mlo_link_info *link_info)
-{
-	uint8_t i;
-
-	WLAN_HOST_DIAG_EVENT_DEF(wlan_diag_event, struct wlan_diag_mlo_setup);
-
-	if (!mlo_is_mld_sta(vdev))
-		return QDF_STATUS_E_FAILURE;
-
-	if (!link_info->present)
-		return QDF_STATUS_E_FAILURE;
-
-	if (!link_info->present)
-		return QDF_STATUS_E_FAILURE;
-
-	qdf_mem_zero(&wlan_diag_event, sizeof(struct wlan_diag_mlo_setup));
-
-	wlan_diag_event.diag_cmn.ktime_us = qdf_ktime_to_us(qdf_ktime_get());
-	wlan_diag_event.diag_cmn.timestamp_us = qdf_get_time_of_the_day_us();
-	wlan_diag_event.version = DIAG_MLO_SETUP_VERSION_V2;
-
-	for (i = 0; i < link_info->num_links; i++) {
-		wlan_diag_event.mlo_cmn_info[i].link_id =
-				link_info->ml_info[i].link_id;
-		wlan_diag_event.mlo_cmn_info[i].vdev_id =
-				wlan_vdev_get_id(vdev);
-		wlan_diag_event.mlo_cmn_info[i].band =
-		wlan_convert_reg_to_diag_band(link_info->ml_info[i].link_band);
-
-		qdf_mem_copy(wlan_diag_event.mlo_cmn_info[i].link_addr,
-			     link_info->ml_info[i].link_addr.bytes,
-			     QDF_MAC_ADDR_SIZE);
-
-		wlan_diag_event.mlo_cmn_info[i].status =
-			link_info->ml_info[i].link_accepted ? ACCEPTED_LINK_STATUS : REJECTED_LINK_STATUS;
-
-	}
-
-	wlan_diag_event.num_links = link_info->num_links;
-	WLAN_HOST_DIAG_EVENT_REPORT(&wlan_diag_event, EVENT_WLAN_MLO_SETUP);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
-
-#ifdef WLAN_FEATURE_11BE_MLO
-static inline bool
-cm_roam_check_mlo_info_present_in_frame_data(struct roam_frame_info *frame_data)
-{
-	return frame_data->link_info.present;
-}
-
-#else
-static inline bool
-cm_roam_check_mlo_info_present_in_frame_data(struct roam_frame_info *frame_data)
-{
-	return false;
-}
-#endif
-
 QDF_STATUS
 cm_roam_mgmt_frame_event(struct wlan_objmgr_vdev *vdev,
 			 struct roam_frame_info *frame_data,
@@ -7456,7 +7260,6 @@ cm_roam_mgmt_frame_event(struct wlan_objmgr_vdev *vdev,
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	uint8_t i;
 	uint16_t diag_event;
-	bool is_mlo = false;
 
 	WLAN_HOST_DIAG_EVENT_DEF(wlan_diag_event, struct wlan_diag_packet_info);
 
@@ -7510,29 +7313,16 @@ cm_roam_mgmt_frame_event(struct wlan_objmgr_vdev *vdev,
 						 !frame_data->is_rsp);
 		diag_event = EVENT_WLAN_MGMT;
 
-		wlan_diag_event.supported_links = frame_data->band;
-
-		/*
-		 * Frame_data->band will be '0' for legacy connection and
-		 * And will be band bit map for MLO connection where band bitmap
-		 * as follows:
-		 * BIT 0: 2 GHz link
-		 * BIT 1: 5 GHz link
-		 * BIT 2: 6 GHz link
-		 */
-		if (frame_data->band) {
-			is_mlo = true;
-			status =
-			wlan_populate_roam_mld_log_param(vdev,
-							 &wlan_diag_event,
-							 wlan_diag_event.subtype);
-			if (QDF_IS_STATUS_ERROR(status)) {
-				mlme_err("vdev: %d Unable to populate MLO parameter",
-					 wlan_vdev_get_id(vdev));
-				return status;
-			}
+		status = wlan_populate_roam_mld_log_param(vdev,
+							  &wlan_diag_event,
+							  wlan_diag_event.subtype);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			mlme_err("vdev: %d Unable to populate MLO parameter",
+				 wlan_vdev_get_id(vdev));
+			return status;
 		}
 
+		wlan_diag_event.supported_links = frame_data->band;
 	}
 
 	if (wlan_diag_event.subtype > WLAN_CONN_DIAG_REASSOC_RESP_EVENT &&
@@ -7546,10 +7336,7 @@ cm_roam_mgmt_frame_event(struct wlan_objmgr_vdev *vdev,
 	WLAN_HOST_DIAG_EVENT_REPORT(&wlan_diag_event, diag_event);
 	if (wlan_diag_event.subtype == WLAN_CONN_DIAG_REASSOC_RESP_EVENT ||
 	    wlan_diag_event.subtype == WLAN_CONN_DIAG_ASSOC_RESP_EVENT) {
-		if (cm_roam_check_mlo_info_present_in_frame_data(frame_data))
-			cm_roam_mlo_setup_info(vdev, frame_data);
-		else
-			wlan_connectivity_mlo_setup_event(vdev, is_mlo);
+		wlan_connectivity_mlo_setup_event(vdev);
 
 		/*
 		 * Send STA info event when roaming is successful

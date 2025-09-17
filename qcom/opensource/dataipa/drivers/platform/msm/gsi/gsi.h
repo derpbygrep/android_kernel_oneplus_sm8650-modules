@@ -18,7 +18,6 @@
 #include <linux/ipc_logging.h>
 #include <linux/iommu.h>
 #include <linux/msi.h>
-#include <linux/ipa_usb.h>
 
 /*
  * The following for adding code (ie. for EMULATION) not found on x86.
@@ -542,7 +541,7 @@ enum gsi_chan_use_db_eng {
  */
 struct gsi_chan_props {
 	enum gsi_chan_prot prot;
-	enum ipa_usb_gsi_chan_dir dir;
+	enum gsi_chan_dir dir;
 	uint8_t ch_id;
 	unsigned long evt_ring_hdl;
 	enum gsi_chan_ring_elem_size re_size;
@@ -1882,14 +1881,6 @@ void gsi_ring_evt_doorbell_polling_mode(unsigned long chan_hdl);
  * @Return gsi_status
  */
 int gsi_config_channel_mode(unsigned long chan_hdl, enum gsi_chan_mode mode);
-
-/**
- * gsi_status_enabled() - Query GSI Status
- *
- * Returns:	true if ENABLED, false on DISABLED
- *
- */
-bool gsi_status_enabled(void);
 
 /**
  * gsi_queue_xfer - Peripheral should call this function

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -504,11 +504,7 @@ static int msm_cvp_remove(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	if (of_device_is_compatible(pdev->dev.of_node, "qcom,msm-cvp"))
-		core = dev_get_drvdata(&pdev->dev);
-	else
-		core = dev_get_drvdata(pdev->dev.parent);
-
+	core = dev_get_drvdata(&pdev->dev);
 	if (!core) {
 		dprintk(CVP_ERR, "%s invalid core", __func__);
 		return -EINVAL;

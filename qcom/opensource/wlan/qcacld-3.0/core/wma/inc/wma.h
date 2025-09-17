@@ -46,7 +46,7 @@
 #include <wlan_policy_mgr_api.h>
 #include "wma_api.h"
 #include "wmi_unified_param.h"
-#include "wmi.h"
+#include "api/fw/wmi.h"
 #include "wlan_cm_roam_public_struct.h"
 #include "target_if.h"
 #include <qdf_hang_event_notifier.h>
@@ -2470,13 +2470,12 @@ void wma_set_peer_ucast_cipher(uint8_t *mac_addr, int32_t cipher,
  * @session_id: vdev session identifier
  * @pairwise: denotes if it is pairwise or group key
  * @key_index: Key Index
- * @peer_mac: MAC address of crypto key entity
  * @cipher_type: cipher type being used for the encryption/decryption
  *
  * Return: None
  */
 void wma_update_set_key(uint8_t session_id, bool pairwise,
-			uint8_t key_index, const uint8_t *peer_mac,
+			uint8_t key_index,
 			enum wlan_crypto_cipher_type cipher_type);
 
 #ifdef WLAN_FEATURE_MOTION_DETECTION

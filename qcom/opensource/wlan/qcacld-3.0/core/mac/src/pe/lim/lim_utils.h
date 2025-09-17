@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -156,6 +156,11 @@ void lim_print_msg_name(struct mac_context *mac, uint16_t logLevel, uint32_t msg
 QDF_STATUS lim_send_set_max_tx_power_req(struct mac_context *mac,
 		int8_t txPower,
 		struct pe_session *pe_session);
+
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+void hostapd_send_sae_uevent(struct sir_sae_msg *sae_msg);
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 
 /**
  * lim_get_num_pwr_levels() - Utility to get number of tx power levels
@@ -511,23 +516,17 @@ void lim_handle_update_olbc_cache(struct mac_context *mac);
 
 uint8_t lim_is_null_ssid(tSirMacSSid *pSsid);
 
-/**
- * lim_stop_tx_and_switch_channel() - Process channel switch
- * @mac: pointer to Global MAC structure
- * @sessionId: PE session Id
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS lim_stop_tx_and_switch_channel(struct mac_context *mac, uint8_t sessionId);
+/* 11h Support */
+void lim_stop_tx_and_switch_channel(struct mac_context *mac, uint8_t sessionId);
 
 /**
  * lim_process_channel_switch() - Process channel switch
  * @mac: pointer to Global MAC structure
  * @vdev_id: Vdev on which CSA is happening
  *
- * Return: QDF_STATUS
+ * Return: none
  */
-QDF_STATUS lim_process_channel_switch(struct mac_context *mac, uint8_t vdev_id);
+void lim_process_channel_switch(struct mac_context *mac, uint8_t vdev_id);
 
 /**
  * lim_switch_primary_channel() - switch primary channel of session
@@ -582,8 +581,8 @@ bool lim_is_channel_valid_for_channel_switch(struct mac_context *mac,
 QDF_STATUS lim_restore_pre_channel_switch_state(struct mac_context *mac,
 		struct pe_session *pe_session);
 
-QDF_STATUS lim_prepare_for11h_channel_switch(struct mac_context *mac,
-					     struct pe_session *pe_session);
+void lim_prepare_for11h_channel_switch(struct mac_context *mac,
+		struct pe_session *pe_session);
 void lim_switch_channel_cback(struct mac_context *mac, QDF_STATUS status,
 		uint32_t *data, struct pe_session *pe_session);
 
@@ -1054,7 +1053,6 @@ QDF_STATUS lim_send_ies_per_band(struct mac_context *mac_ctx,
 
 /**
  * lim_update_connect_rsn_ie() - Update the connection RSN IE
- * @mac_ctx: MAC context
  * @session: PE session
  * @rsn_ie_buf: RSN IE buffer
  * @pmksa: PMKSA entry for the connecting AP
@@ -1062,8 +1060,7 @@ QDF_STATUS lim_send_ies_per_band(struct mac_context *mac_ctx,
  * Return: None
  */
 void
-lim_update_connect_rsn_ie(struct mac_context *mac_ctx,
-			  struct pe_session *session, uint8_t *rsn_ie_buf,
+lim_update_connect_rsn_ie(struct pe_session *session, uint8_t *rsn_ie_buf,
 			  struct wlan_crypto_pmksa *pmksa);
 
 /**
@@ -1513,14 +1510,6 @@ void lim_update_stads_he_capable(tpDphHashNode sta_ds, tpSirAssocReq assoc_req);
  */
 void lim_update_session_he_capable(struct mac_context *mac, struct pe_session *session);
 
-/*
- * lim_reset_session_he_capable(): Reset he_capable flag in PE session
- * @pe_session: pointer to PE session
- *
- * Return: None
- */
-void lim_reset_session_he_capable(struct pe_session *session);
-
 /**
  * lim_update_session_he_capable_chan_switch(): Update he_capable in PE session
  * @mac: pointer to MAC context
@@ -1759,10 +1748,6 @@ static inline void lim_update_bss_he_capable(struct mac_context *mac,
 {
 }
 
-static inline void lim_reset_session_he_capable(struct pe_session *session)
-{
-}
-
 static inline void lim_update_stads_he_capable(tpDphHashNode sta_ds,
 		tpSirAssocReq assoc_req)
 {
@@ -1829,6 +1814,21 @@ static inline bool lim_is_session_eht_capable(struct pe_session *session)
 static inline bool lim_is_sta_eht_capable(tpDphHashNode sta_ds)
 {
 	return sta_ds->mlmStaContext.eht_capable;
+}
+
+/**
+ * lim_get_punc_chan_bit_map() - get session eht puncture bitmap
+ * @session: pe session
+ *
+ * Return: puncture bitmap
+ */
+static inline uint16_t
+lim_get_punc_chan_bit_map(struct pe_session *session)
+{
+	if (session->eht_op.disabled_sub_chan_bitmap_present)
+		return *(uint16_t *)session->eht_op.disabled_sub_chan_bitmap;
+
+	return 0;
 }
 
 QDF_STATUS lim_strip_eht_op_ie(struct mac_context *mac_ctx,
@@ -1958,12 +1958,13 @@ void lim_intersect_sta_eht_caps(struct mac_context *mac_ctx,
 
 /**
  * lim_update_session_eht_capable(): Update eht_capable in PE session
+ * @mac: pointer to MAC context
  * @session: pointer to PE session
- * @val: EHT capability
  *
  * Return: None
  */
-void lim_update_session_eht_capable(struct pe_session *session, bool val);
+void lim_update_session_eht_capable(struct mac_context *mac,
+				    struct pe_session *session);
 
 /**
  * lim_add_bss_eht_cfg() - Set EHT config to BSS params
@@ -2119,12 +2120,14 @@ void lim_log_eht_op(struct mac_context *mac, tDot11fIEeht_op *eht_ops,
  * @sta_ds: pointer to sta dph hash table entry
  * @assoc_rsp: pointer to assoc response
  * @session_entry: pointer to PE session
+ * @beacon: pointer to beacon
  *
  * Return: None
  */
 void lim_update_stads_eht_caps(struct mac_context *mac_ctx,
 			       tpDphHashNode sta_ds, tpSirAssocRsp assoc_rsp,
-			       struct pe_session *session_entry);
+			       struct pe_session *session_entry,
+			       tSchBeaconStruct *beacon);
 
 /**
  * lim_update_stads_eht_bw_320mhz() - Set ch_width to 320MHz for sta_ds
@@ -2196,6 +2199,11 @@ static inline bool lim_is_session_eht_capable(struct pe_session *session)
 static inline bool lim_is_sta_eht_capable(tpDphHashNode sta_ds)
 {
 	return false;
+}
+
+static inline uint16_t lim_get_punc_chan_bit_map(struct pe_session *session)
+{
+	return 0;
 }
 
 static inline
@@ -2278,7 +2286,8 @@ void lim_intersect_sta_eht_caps(struct mac_context *mac_ctx,
 }
 
 static inline
-void lim_update_session_eht_capable(struct pe_session *session, bool val)
+void lim_update_session_eht_capable(struct mac_context *mac,
+				    struct pe_session *session)
 {
 }
 
@@ -2346,7 +2355,8 @@ lim_log_eht_op(struct mac_context *mac, tDot11fIEeht_op *eht_ops,
 static inline void
 lim_update_stads_eht_caps(struct mac_context *mac_ctx,
 			  tpDphHashNode sta_ds, tpSirAssocRsp assoc_rsp,
-			  struct pe_session *session_entry)
+			  struct pe_session *session_entry,
+			  tSchBeaconStruct *beacon)
 {
 }
 
