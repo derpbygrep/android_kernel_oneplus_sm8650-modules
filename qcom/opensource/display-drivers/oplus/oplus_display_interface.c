@@ -571,7 +571,8 @@ int oplus_panel_gpio_on(struct dsi_panel *panel)
 		|| !strcmp(panel->oplus_priv.vendor_name , "A0004")
 		|| !strcmp(panel->oplus_priv.vendor_name , "A0020")
 		|| !strcmp(panel->oplus_priv.vendor_name , "AB781")
-		|| !strcmp(panel->oplus_priv.vendor_name , "AC223"))
+		|| !strcmp(panel->oplus_priv.vendor_name , "AC223")
+		|| !strcmp(panel->oplus_priv.vendor_name , "AA592"))
 		return 0;
 
 	r_config = &panel->reset_config;
@@ -609,7 +610,8 @@ int oplus_panel_gpio_off(struct dsi_panel *panel)
 		|| !strcmp(panel->oplus_priv.vendor_name , "A0004")
 		|| !strcmp(panel->oplus_priv.vendor_name , "A0020")
 		|| !strcmp(panel->oplus_priv.vendor_name , "AB781")
-		|| !strcmp(panel->oplus_priv.vendor_name , "AC223"))
+		|| !strcmp(panel->oplus_priv.vendor_name , "AC223")
+		|| !strcmp(panel->oplus_priv.vendor_name , "AA592"))
 		return 0;
 
 	r_config = &panel->reset_config;
@@ -639,7 +641,8 @@ int oplus_panel_vddr_on(struct dsi_display *display, const char *vreg_name)
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0004")
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0020")
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "AB781")
-		|| !strcmp(display->panel->oplus_priv.vendor_name , "AC223"))
+		|| !strcmp(display->panel->oplus_priv.vendor_name , "AC223")
+		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0014"))
 		&& !strcmp(vreg_name, "vddio")) {
 		if (gpio_is_valid(display->panel->reset_config.panel_vout_gpio)) {
 			rc = gpio_direction_output(display->panel->reset_config.panel_vout_gpio, 1);
@@ -670,7 +673,8 @@ int oplus_panel_vddr_off(struct dsi_display *display, const char *vreg_name)
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0004")
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0020")
 		|| !strcmp(display->panel->oplus_priv.vendor_name , "AB781")
-		|| !strcmp(display->panel->oplus_priv.vendor_name , "AC223"))
+		|| !strcmp(display->panel->oplus_priv.vendor_name , "AC223")
+		|| !strcmp(display->panel->oplus_priv.vendor_name , "A0014"))
 		&& !strcmp(vreg_name, "vci")) {
 		if (gpio_is_valid(display->panel->reset_config.panel_vout_gpio)) {
 			gpio_set_value(display->panel->reset_config.panel_vout_gpio, 0);

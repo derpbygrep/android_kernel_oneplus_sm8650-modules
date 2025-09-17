@@ -82,6 +82,7 @@ struct oplus_ofp_params {
 													 bit(7):ultra low power aod
 													 bit(8):fod color feature flag
 													 bit(9):video mode aod && fod
+													 bit(10):local hbm unlocking acceleration
 													*/
 	bool fp_type_compatible_mode;					/* indicates whether fp type compatible mode is set or not */
 	bool need_to_bypass_gamut;						/* indicates whether gamut needs to be bypassed in aod/fod scenarios or not */
@@ -92,6 +93,7 @@ struct oplus_ofp_params {
 	uint64_t hbm_enable;							/* HBM_ENABLE property value */
 	bool need_to_update_lhbm_vdc;	                    /* indicates whether lhbm vdc params needs to be updated or not */
 	bool need_to_update_lhbm_pressed_icon_gamma;	/* indicates whether lhbm pressed icon gamma needs to be read and updated or not */
+	bool need_to_update_lhbm_pressed_icon_gamma_nt37707;	/* indicates whether lhbm pressed icon gamma needs to be read and updated or not for NT37707 */
 	bool hbm_state;									/* indicates whether panel is hbm state or not */
 	bool panel_hbm_status;							/* indicates whether hbm cmds are taking effect in panel module or not */
 	bool fp_press;									/* indicates whether pressed icon layer is ready or not */
@@ -103,9 +105,11 @@ struct oplus_ofp_params {
 	unsigned int *lhbm_dbv_alpha_value;				/* the lhbm dbv alpha value which represents the alpha register setting corresponding to the backlight level */
 	struct workqueue_struct *uiready_event_wq;		/* a workqueue used to send uiready event */
 	struct work_struct uiready_event_work;			/* a work struct used to send uiready event */
+	struct hrtimer timer;							/* add for uiready notifier call chain */
 	/* aod */
 	bool doze_active;								/* indicates whether the current power mode is doze/doze suspend or not */
 	bool aod_state;									/* indicates whether panel is aod state or not */
+	bool need_to_filter_backlight_after_aod_off;	/* indicates whether backlight need to be filter after aod off or not */
 	bool need_to_wait_data_before_aod_on;			/* indicates whether display on cmd(29h) needs to be sent after image data write before aod on or not */
 	bool wait_data_before_aod_on;					/* indicates whether to start waiting image data before aod on or not */
 	bool aod_unlocking;								/* indicates whether the fingerprint unlocking is in aod state or not */
@@ -195,6 +199,7 @@ bool oplus_ofp_optical_new_solution_is_enabled(void);
 bool oplus_ofp_local_hbm_is_enabled(void);
 bool oplus_ofp_ultrasonic_is_enabled(void);
 bool oplus_ofp_video_mode_aod_fod_is_enabled(void);
+bool oplus_ofp_local_hbm_unlocking_acceleration_is_enabled(void);
 bool oplus_ofp_need_to_do_aod_off_compensation(void);
 bool oplus_ofp_get_hbm_state(void);
 int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, int prop_id, uint64_t prop_val);
@@ -202,15 +207,22 @@ int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, in
 /* -------------------- fod -------------------- */
 int oplus_ofp_parse_dtsi_config(void *dsi_display_mode, void *dsi_parser_utils);
 int oplus_ofp_lhbm_pressed_icon_gamma_update(void *dsi_display);
+int oplus_ofp_lhbm_pressed_icon_gamma_update_NT37707(void *dsi_display);
+int oplus_ofp_lhbm_pressed_icon_grayscale_update_NT37707(void *dsi_panel, unsigned int bl_level);
+int oplus_ofp_lhbm_pressed_icon_gamma_NT37707_enable(void *dsi_display);
 int oplus_ofp_lhbm_backlight_update(void *sde_encoder_virt, void *dsi_panel, unsigned int *bl_level);
 int oplus_ofp_lhbm_dbv_alpha_update(void *dsi_panel, unsigned int bl_level, bool mutex_lock);
 int oplus_ofp_send_hbm_state_event(unsigned int hbm_state);
 int oplus_ofp_hbm_handle(void *sde_encoder_virt);
+int oplus_ofp_lhbm_handle_kick(void *sde_encoder_virt);
+int oplus_ofp_lhbm_handle(void *dsi_display);
 int oplus_ofp_cmd_post_wait(void *dsi_display_mode, void *dsi_cmd_desc, enum dsi_cmd_set_type type);
 int oplus_ofp_panel_hbm_status_update(void *sde_encoder_phys);
 int oplus_ofp_pressed_icon_status_update(void *sde_encoder_phys, unsigned int irq_type);
 void oplus_ofp_uiready_event_work_handler(struct work_struct *work_item);
+enum hrtimer_restart oplus_ofp_notify_uiready_timer_handler(struct hrtimer *timer);
 int oplus_ofp_notify_uiready(void *sde_encoder_phys);
+int oplus_ofp_lhbm_resend_uiready(void *dsi_display);
 bool oplus_ofp_backlight_filter(void *dsi_panel, unsigned int bl_level);
 bool oplus_ofp_need_pcc_change(void *s_crtc);
 int oplus_ofp_set_dspp_pcc_feature(void *sde_hw_cp_cfg, void *s_crtc, bool before_setup_pcc);

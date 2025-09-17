@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2021-2023, 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -314,7 +314,6 @@ enum dsi_dyn_clk_feature_type {
  * @DSI_CMD_SET_POST_TIMING_SWITCH:        Post timing switch
  * @DSI_CMD_SET_QSYNC_ON                   Enable qsync mode
  * @DSI_CMD_SET_QSYNC_OFF                  Disable qsync mode
- * @DSI_CMD_SET_CALIBRATION_DATA           Panel calibration data
  * @DSI_CMD_SET_MAX
  */
 enum dsi_cmd_set_type {
@@ -344,7 +343,6 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_POST_TIMING_SWITCH,
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
-	DSI_CMD_SET_CALIBRATION_DATA,
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 	DSI_CMD_ADFR_AUTO_ON,
 	DSI_CMD_ADFR_AUTO_OFF,
@@ -423,8 +421,11 @@ enum dsi_cmd_set_type {
 	DSI_CMD_HBM_OFF,
 	DSI_CMD_HBM_OFF_60HZ,
 	DSI_CMD_LHBM_PRESSED_ICON_GAMMA,
+	DSI_CMD_LHBM_PRESSED_ICON_GAMMA_NT37707,
 	DSI_CMD_LHBM_PRESSED_ICON_GRAYSCALE,
+	DSI_CMD_LHBM_PRESSED_ICON_GRAYSCALE_NT37707,
 	DSI_CMD_LHBM_PRESSED_ICON_ON,
+	DSI_CMD_LHBM_PRESSED_ICON_PWM,
 	DSI_CMD_LHBM_PRESSED_ICON_OFF,
 	DSI_CMD_LHBM_UPDATE_VDC,
 	DSI_CMD_LHBM_DBV_ALPHA,
@@ -492,6 +493,8 @@ enum dsi_cmd_set_type {
 	DSI_CMD_CABC_IMAGE,
 	DSI_CMD_CABC_VIDEO,
 	DSI_CMD_ESD_SWITCH_PAGE,
+	DSI_CMD_ESD_OFFSET_LOCATION,
+	DSI_CMD_ESD_OFFSET_LOCATION_TWO,
 	DSI_CMD_PANEL_DATE_SWITCH,
 	DSI_CMD_PANEL_INFO_SWITCH_PAGE,
 	DSI_CMD_PANEL_INIT,
@@ -954,6 +957,7 @@ struct dsi_display_mode_priv_info {
 	unsigned int oplus_ofp_uiready_delay_frames;
 	unsigned int oplus_ofp_aod_off_insert_black_frame;
 	unsigned int oplus_ofp_aod_off_black_frame_total_time;
+	unsigned int oplus_ofp_aod_off_setbacklight_delay;
 #endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 };
 

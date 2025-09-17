@@ -20,7 +20,6 @@
 #include "sde_crtc.h"
 #include "sde_rm.h"
 #include "sde_vm.h"
-#include "sde_hw_catalog.h"
 #include <drm/drm_probe_helper.h>
 #include <linux/version.h>
 #if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
@@ -1399,7 +1398,12 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 	if (!sde_in_trusted_vm(sde_kms) && c_conn->bl_device && !display->poms_pending) {
 		c_conn->bl_device->props.power = FB_BLANK_UNBLANK;
 		c_conn->bl_device->props.state &= ~BL_CORE_FBBLANK;
+#ifdef OPLUS_FEATURE_DISPLAY
+		if (c_conn->bl_device->props.brightness != 0)
+			backlight_update_status(c_conn->bl_device);
+#else
 		backlight_update_status(c_conn->bl_device);
+#endif
 	}
 }
 
@@ -3170,6 +3174,14 @@ int sde_connector_esd_status(struct drm_connector *conn)
 		mutex_unlock(&sde_conn->lock);
 		return -ETIMEDOUT;
 	}
+#ifdef OPLUS_FEATURE_DISPLAY
+	if (display) {
+		if (oplus_display_check_status_pre(display->panel)) {
+			mutex_unlock(&sde_conn->lock);
+			return -ETIMEDOUT;
+		}
+	}
+#endif /* OPLUS_FEATURE_DISPLAY */
 	ret = sde_conn->ops.check_status(&sde_conn->base,
 					 sde_conn->display, true);
 	mutex_unlock(&sde_conn->lock);
@@ -3193,6 +3205,9 @@ static void sde_connector_check_status_work(struct work_struct *work)
 	struct sde_connector *conn;
 	int rc = 0;
 	struct device *dev;
+#ifdef OPLUS_FEATURE_DISPLAY
+	struct dsi_display *display;
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 	conn = container_of(to_delayed_work(work),
 			struct sde_connector, status_work);
@@ -3210,6 +3225,16 @@ static void sde_connector_check_status_work(struct work_struct *work)
 		mutex_unlock(&conn->lock);
 		return;
 	}
+
+#ifdef OPLUS_FEATURE_DISPLAY
+	display = (struct dsi_display *)(conn->display);
+	if (display) {
+		if (oplus_display_check_status_pre(display->panel)) {
+			mutex_unlock(&conn->lock);
+			return;
+		}
+	}
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 	rc = conn->ops.check_status(&conn->base, conn->display, false);
 	mutex_unlock(&conn->lock);
@@ -3757,8 +3782,6 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	c_conn->base.polled = connector_poll;
 	c_conn->base.interlace_allowed = 0;
 	c_conn->base.doublescan_allowed = 0;
-
-	c_conn->capabilities = sde_kms->catalog->capabilities;
 
 #if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
 	c_conn->bl_rd_index = 0;

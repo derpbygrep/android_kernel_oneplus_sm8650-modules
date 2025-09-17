@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -339,6 +339,12 @@ error:
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 	oplus_adfr_sa_mode_restore(dsi_display);
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_lhbm_handle(dsi_display);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 #ifdef OPLUS_FEATURE_DISPLAY
 	if (!rc)
@@ -975,6 +981,9 @@ static int dsi_display_read_status(struct dsi_display_ctrl *ctrl,
 			}
 		} else {
 #endif
+#ifdef OPLUS_FEATURE_DISPLAY
+		oplus_display_esd_check_mode_switch(panel, i);
+#endif /* OPLUS_FEATURE_DISPLAY */
 		rc = dsi_ctrl_transfer_prepare(ctrl->ctrl, cmds[i].ctrl_flags);
 		if (rc) {
 			DSI_ERR("prepare for rx cmd transfer failed rc=%d\n", rc);
@@ -1252,23 +1261,6 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 	/* Prevent another ESD check,when ESD recovery is underway */
 	if (atomic_read(&panel->esd_recovery_pending))
 		goto release_panel_lock;
-
-#ifdef OPLUS_FEATURE_DISPLAY
-	if (atomic_read(&panel->esd_pending)) {
-		DSI_WARN("Skip the check because esd is pending\n");
-		if (!strcmp(dsi_display->panel->name, "AB964 p 1 A0017 dsc video mode panel")) {
-			if (dsi_display->panel->oplus_priv.set_backlight_not_do_esd_reg_read_enable
-			&& dsi_display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
-				atomic_set(&panel->esd_pending, 0);
-			}
-		}
-		goto release_panel_lock;
-	}
-	if (panel->power_mode != SDE_MODE_DPMS_ON) {
-		DSI_WARN("Skip the check because panel power mode not power on!\n");
-		goto release_panel_lock;
-	}
-#endif /* OPLUS_FEATURE_DISPLAY */
 
 	status_mode = panel->esd_config.status_mode;
 
@@ -3803,17 +3795,6 @@ int dsi_host_transfer_sub(struct mipi_dsi_host *host, struct dsi_cmd_desc *cmd)
 
 	dsi_display_set_cmd_tx_ctrl_flags(display, cmd);
 
-	/*
-	 * Wait until any previous broadcast commands with ASYNC waits have been scheduled
-	 * and completed on both controllers.
-	 */
-	display_for_each_ctrl(i, display) {
-		ctrl = &display->ctrl[i];
-		if ((ctrl->ctrl->pending_cmd_flags & DSI_CTRL_CMD_BROADCAST) &&
-			ctrl->ctrl->post_tx_queued)
-			dsi_ctrl_flush_cmd_dma_queue(ctrl->ctrl);
-	}
-
 	if (cmd->ctrl_flags & DSI_CTRL_CMD_BROADCAST) {
 		rc = dsi_display_broadcast_cmd(display, cmd);
 		if (rc) {
@@ -5824,22 +5805,6 @@ int dsi_display_cont_splash_config(void *dsi_display)
 	mutex_lock(&display->display_lock);
 
 	display->is_cont_splash_enabled = true;
-
-	/*
-	 * Vote on panel regulator is added to make sure panel regulators are ON
-	 * for cont-splash enabled usecase in case of hibernate exit.
-	 */
-	if (display->is_hibernate_splash_enabled) {
-		display->is_hibernate_exit = true;
-		rc = dsi_pwr_enable_regulator(&display->panel->power_info, true);
-		if (rc)
-			DSI_ERR("[%s] failed to disable vregs, rc=%d\n",
-					display->panel->name, rc);
-
-	}
-
-	if (!display->is_hibernate_splash_enabled)
-		display->is_hibernate_splash_enabled = true;
 
 	/* Update splash status for clock manager */
 	dsi_display_clk_mngr_update_splash_status(display->clk_mngr,
@@ -8964,12 +8929,6 @@ int dsi_display_prepare(struct dsi_display *display)
 	/* Set up ctrl isr before enabling core clk */
 	if (!display->trusted_vm_env)
 		dsi_display_ctrl_isr_configure(display, true);
-
-	/* Unset DMS flag in case of hibernate exit */
-	if (display->is_hibernate_exit) {
-		mode->dsi_mode_flags &= ~DSI_MODE_FLAG_DMS;
-		display->is_hibernate_exit = false;
-	}
 
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
 		if (display->is_cont_splash_enabled &&

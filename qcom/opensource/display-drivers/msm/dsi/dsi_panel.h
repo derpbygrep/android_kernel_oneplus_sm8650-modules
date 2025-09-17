@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -261,10 +261,10 @@ struct dsi_panel_oplus_privite {
 	bool dimming_setting_before_bl_0_enable;
 	bool vidmode_backlight_async_wait_enable;
 	bool set_backlight_not_do_esd_reg_read_enable;
-	bool gamma_compensation_support;
 	/* indicates how many frames cost from aod off cmd sent to normal frame,
 	"0" means once aod off cmd sent the next frame will be normal frame */
 	unsigned int aod_off_frame_cost;
+	bool gamma_compensation_support;
 };
 
 struct dsi_panel_oplus_serial_number {
@@ -416,11 +416,6 @@ struct dsi_panel_ops {
 	int (*trigger_esd_attack)(struct dsi_panel *panel);
 };
 
-struct dsi_panel_calib_data {
-	char *data;
-	size_t len;
-};
-
 struct dsi_panel {
 	const char *name;
 	const char *type;
@@ -463,7 +458,6 @@ struct dsi_panel {
 	bool ulps_suspend_enabled;
 	bool allow_phy_power_off;
 	bool reset_gpio_always_on;
-	bool calibration_enabled;
 	atomic_t esd_recovery_pending;
 
 	bool panel_initialized;
@@ -485,7 +479,6 @@ struct dsi_panel {
 	enum dsi_panel_physical_type panel_type;
 
 	struct dsi_panel_ops panel_ops;
-	struct dsi_panel_calib_data calib_data;
 #ifdef OPLUS_FEATURE_DISPLAY
 	bool need_power_on_backlight;
 	struct oplus_brightness_alpha *dc_ba_seq;

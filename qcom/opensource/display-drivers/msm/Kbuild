@@ -36,9 +36,6 @@ ifeq ($(CONFIG_ARCH_PINEAPPLE), y)
 ifeq ($(CONFIG_ARCH_QTI_VM), y)
     include $(DISPLAY_ROOT)/config/gki_pineappledisptui.conf
     LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_pineappledisptuiconf.h
-else ifeq ($(BOARD_PLATFORM), volcano)
-    include $(DISPLAY_ROOT)/config/gki_volcanodisp.conf
-    LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_volcanodispconf.h
 else
 	include $(DISPLAY_ROOT)/config/gki_pineappledisp.conf
 	LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_pineappledispconf.h
@@ -104,8 +101,8 @@ ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
 EXTRA_CFLAGS += -Wmaybe-uninitialized
 endif
 
-KBUILD_EXTRA_SYMBOLS +=$(OUT)/obj/sm8650-modules/qcom/opensource/display-drivers/hdcp/Module.symvers
-KBUILD_EXTRA_SYMBOLS +=$(OUT)/obj/sm8650-modules/qcom/opensource/display-drivers/msm/Module.symvers
+KBUILD_EXTRA_SYMBOLS +=$(OUT)/obj/vendor/qcom/opensource/display-drivers/hdcp/Module.symvers
+KBUILD_EXTRA_SYMBOLS +=$(OUT)/obj/vendor/qcom/opensource/display-drivers/msm/Module.symvers
 
 ifeq ($(call cc-option-yn, -Wheader-guard),y)
 EXTRA_CFLAGS += -Wheader-guard
@@ -301,4 +298,6 @@ msm_drm-$(CONFIG_DRM_MSM) += msm_atomic.o \
 			     msm_smmu.o \
 			     msm_prop.o \
 			     leds_ktz8866.o
+
+CDEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"
 

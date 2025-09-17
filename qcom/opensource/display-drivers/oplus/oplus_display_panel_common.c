@@ -570,7 +570,19 @@ int oplus_display_panel_get_serial_number(void *buf)
 		panel_serial_info.reg_index = display->panel->oplus_ser.serial_number_index;
 
 		panel_serial_info.year = (read[panel_serial_info.reg_index] & 0xF0) >> 0x4;
-		if (!strcmp(display->panel->name, "AC172 P 7 A0001 dsc cmd mode panel")) {
+
+		if (!panel_serial_info.year) {
+			/*
+			 * the panel we use always large than 2011, so
+			 * force retry when year is 2011
+			 */
+			msleep(20);
+			LCD_ERR("continue force retry when year is 2011\n");
+			continue;
+		}
+
+		if (!strcmp(display->panel->name, "AC172 P 7 A0001 dsc cmd mode panel") ||
+			!strcmp(display->panel->name, "AA592 P 7 A0014 dsc cmd mode panel")) {
 			panel_serial_info.year += 10;
 		}
 
@@ -590,15 +602,6 @@ int oplus_display_panel_get_serial_number(void *buf)
 				+ (panel_serial_info.second	<< 16)\
 				+ (panel_serial_info.reserved[0] << 8)\
 				+ (panel_serial_info.reserved[1]);
-
-		if (!panel_serial_info.year) {
-			/*
-			 * the panel we use always large than 2011, so
-			 * force retry when year is 2011
-			 */
-			msleep(20);
-			continue;
-		}
 
 		if (display->panel->oplus_ser.is_switch_page) {
 			/* switch default page */
