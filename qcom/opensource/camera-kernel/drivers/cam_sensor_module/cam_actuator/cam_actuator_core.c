@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -15,6 +15,8 @@
 #include "oplus_cam_actuator_core.h"
 #include "oplus_cam_actuator_dev.h"
 #include "oplus_cam_kevent_fb.h"
+
+static bool fb_payload_flag = FALSE;
 #endif
 
 int32_t cam_actuator_construct_default_power_setting(
@@ -203,11 +205,36 @@ static int32_t cam_actuator_i2c_modes_util(
 {
 	int32_t rc = 0;
 	uint32_t i, size;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int32_t retry_count;
+	int32_t MaxRetryCount = 10;
+#endif
 
 	if (i2c_list->op_code == CAM_SENSOR_I2C_WRITE_RANDOM) {
 		rc = camera_io_dev_write(io_master_info,
 			&(i2c_list->i2c_settings));
 		if (rc < 0) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			if(-EINVAL == rc)
+			{
+				for (retry_count = 0; retry_count < MaxRetryCount; retry_count++)
+				{
+					rc = camera_io_dev_write(io_master_info,&(i2c_list->i2c_settings));
+					if(rc>=0)
+					{
+						CAM_ERR(CAM_ACTUATOR, "retry write I2C settings success");
+						return rc;
+					}
+					CAM_ERR(CAM_ACTUATOR, "retry write I2C settings fail retry_count:%d", retry_count+1);
+					if(-ETIMEDOUT == rc)
+					{
+						CAM_ERR(CAM_ACTUATOR, "Iic is no longer responding");
+						return rc;
+					}
+					msleep(3);
+				}
+			}
+#endif
 			CAM_ERR(CAM_ACTUATOR,
 				"Failed to random write I2C settings: %d",
 				rc);
@@ -296,6 +323,12 @@ int32_t cam_actuator_apply_settings(struct cam_actuator_ctrl_t *a_ctrl,
 	struct i2c_settings_list *i2c_list;
 	int32_t rc = 0;
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int af_cci = 8;
+	char fb_payload[PAYLOAD_LENGTH] = {0};
+	af_cci = (a_ctrl->cci_i2c_master << 1)|(a_ctrl->cci_num);
+#endif
+
 	if (a_ctrl == NULL || i2c_set == NULL) {
 		CAM_ERR(CAM_ACTUATOR, "Invalid Args");
 		return -EINVAL;
@@ -316,9 +349,41 @@ int32_t cam_actuator_apply_settings(struct cam_actuator_ctrl_t *a_ctrl,
 				"Failed to apply settings: %d",
 				rc);
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
+			if (-ETIMEDOUT == rc)
+			{
+				//Set Notify Rfi Reduced power
+				CAM_ERR(CAM_ACTUATOR,"notify RFI to reduce Frequency and report iic error to fb");
+				oplus_cam_actuator_SetNotifyRfiService(a_ctrl, i2c_set);
+
+				//report iic error to fb
+				if(FALSE == fb_payload_flag)
+				{
+					KEVENT_FB_ACTUATOR_IIC_FAILED(fb_payload, "actuator iic control error",af_cci);
+					fb_payload_flag = TRUE;
+				}
+				return rc;
+			}
+
 			oplus_cam_actuator_reactive_setting_apply(a_ctrl);
+
+			if (-110 == rc)
+			{
+				//report iic error to fb
+				if(FALSE == fb_payload_flag)
+				{
+					af_cci = (a_ctrl->cci_i2c_master << 1)|(a_ctrl->cci_num);
+					KEVENT_FB_ACTUATOR_IIC_FAILED(fb_payload, "actuator iic control error",af_cci);
+					fb_payload_flag = TRUE;
+				}
+				return rc;
+			}
 #endif
 		} else {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			if(fb_payload_flag == TRUE && af_cci == 0){
+				fb_payload_flag = FALSE;
+			}
+#endif
 			CAM_DBG(CAM_ACTUATOR,
 				"Success:request ID: %d",
 				i2c_set->request_id);
@@ -484,7 +549,6 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 	struct common_header      *cmm_hdr = NULL;
 	struct cam_control        *ioctl_ctrl = NULL;
 	struct cam_packet         *csl_packet = NULL;
-	struct cam_packet         *csl_packet_u = NULL;
 	struct cam_config_dev_cmd config;
 	struct i2c_data_settings  *i2c_data = NULL;
 	struct i2c_settings_array *i2c_reg_settings = NULL;
@@ -523,15 +587,17 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 			"Inval cam_packet strut size: %zu, len_of_buff: %zu",
 			 sizeof(struct cam_packet), len_of_buff);
 		rc = -EINVAL;
-		goto put_buf;
+		goto end;
 	}
 
 	remain_len -= (size_t)config.offset;
-	csl_packet_u = (struct cam_packet *)
-		(generic_pkt_ptr + (uint32_t)config.offset);
-	rc = cam_packet_util_copy_pkt_to_kmd(csl_packet_u, &csl_packet, remain_len);
-	if (rc) {
-		CAM_ERR(CAM_ACTUATOR, "Copying packet to KMD failed");
+	csl_packet = (struct cam_packet *)
+			(generic_pkt_ptr + (uint32_t)config.offset);
+
+	if (cam_packet_util_validate_packet(csl_packet,
+		remain_len)) {
+		CAM_ERR(CAM_ACTUATOR, "Invalid packet params");
+		rc = -EINVAL;
 		goto end;
 	}
 
@@ -847,8 +913,6 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 	}
 
 end:
-	cam_common_mem_free(csl_packet);
-put_buf:
 	cam_mem_put_cpu_buf(config.packet_handle);
 	return rc;
 }

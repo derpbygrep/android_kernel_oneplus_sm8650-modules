@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -471,11 +471,10 @@ int32_t cam_sensor_handle_random_read(
 	struct cam_buf_io_cfg *io_cfg)
 {
 	struct i2c_settings_list *i2c_list;
-	int32_t rc = 0, cnt = 0, payload_count = 0;
+	int32_t rc = 0, cnt = 0;
 
-	payload_count = cmd_i2c_random_rd->header.count;
 	i2c_list = cam_sensor_get_i2c_ptr(i2c_reg_settings,
-		payload_count);
+		cmd_i2c_random_rd->header.count);
 	if ((i2c_list == NULL) ||
 		(i2c_list->i2c_settings.reg_setting == NULL)) {
 		CAM_ERR(CAM_SENSOR_UTIL,
@@ -490,7 +489,7 @@ int32_t cam_sensor_handle_random_read(
 	} else {
 		*cmd_length_in_bytes = sizeof(struct i2c_rdwr_header) +
 			(sizeof(struct cam_cmd_read) *
-			payload_count);
+			(cmd_i2c_random_rd->header.count));
 		i2c_list->op_code = CAM_SENSOR_I2C_READ_RANDOM;
 		i2c_list->i2c_settings.addr_type =
 			cmd_i2c_random_rd->header.addr_type;
@@ -499,7 +498,8 @@ int32_t cam_sensor_handle_random_read(
 		i2c_list->i2c_settings.size =
 			cmd_i2c_random_rd->header.count;
 
-		for (cnt = 0; cnt < payload_count; cnt++) {
+		for (cnt = 0; cnt < (cmd_i2c_random_rd->header.count);
+			cnt++) {
 			i2c_list->i2c_settings.reg_setting[cnt].reg_addr =
 				cmd_i2c_random_rd->data_read[cnt].reg_data;
 		}
@@ -1406,16 +1406,15 @@ int32_t cam_sensor_update_power_settings(void *cmd_buf,
 		kzalloc(sizeof(struct cam_cmd_power), GFP_KERNEL);
 	if (!pwr_cmd)
 		return -ENOMEM;
+	memcpy(pwr_cmd, cmd_buf, sizeof(struct cam_cmd_power));
 
-	if (!cmd_length || cmd_buf_len < (size_t)cmd_length ||
+	if (!pwr_cmd || !cmd_length || cmd_buf_len < (size_t)cmd_length ||
 		cam_sensor_validate(cmd_buf, cmd_buf_len)) {
-		CAM_ERR(CAM_SENSOR_UTIL, "Invalid Args: cmd_length: %d cmd_buf_len %d",
-			cmd_length, cmd_buf_len);
+		CAM_ERR(CAM_SENSOR_UTIL, "Invalid Args: pwr_cmd %pK, cmd_length: %d",
+			pwr_cmd, cmd_length);
 		rc = -EINVAL;
 		goto free_power_command;
 	}
-
-	memcpy(pwr_cmd, cmd_buf, sizeof(struct cam_cmd_power));
 
 	power_info->power_setting_size = 0;
 	power_info->power_setting =

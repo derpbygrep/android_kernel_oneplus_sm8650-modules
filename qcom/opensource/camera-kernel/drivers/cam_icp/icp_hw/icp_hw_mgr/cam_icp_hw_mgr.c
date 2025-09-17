@@ -3036,53 +3036,6 @@ static void cam_icp_mgr_process_dbg_buf(struct cam_icp_hw_mgr *hw_mgr)
 	} while (read_in_words >= buf_word_size);
 }
 
-static int cam_icp_mgr_process_feature_property_ack(
-	struct cam_icp_hw_mgr *hw_mgr, uint32_t *msg_ptr)
-{
-	struct hfi_msg_init_done *init_done_ptr = (struct hfi_msg_init_done *)msg_ptr;
-	struct hfi_sys_camera_icp_fw_features *fw_features_ptr;
-	uint32_t *property_data_ptr = NULL;
-
-	CAM_DBG(CAM_ICP, "[%s] received num_props: %d", hw_mgr->hw_mgr_name,
-							init_done_ptr->num_prop);
-	property_data_ptr = &init_done_ptr->prop_data[0];
-	for (uint8_t i = 0; i < init_done_ptr->num_prop; i++) {
-		/*
-		 * ICP FW issues 1 property (HFI_PROP_SYS_SUPPORTED) by default.
-		 * This data is not used.
-		 * However, on few platforms (like, MilosIOT),
-		 * FW appends second property HFI_PROPERTY_SYS_ICP_FEATURE_SUPPORTED
-		 * check if this second property is set.
-		 */
-		switch (*property_data_ptr) {
-		case HFI_PROP_SYS_SUPPORTED:
-			CAM_DBG(CAM_ICP,
-				"[%s] skip to next property based on this property size",
-				hw_mgr->hw_mgr_name);
-			property_data_ptr = (uint32_t *)((uint8_t *)((struct hfi_sys_support *)
-						(init_done_ptr->prop_data + 1)) +
-						sizeof(struct hfi_sys_support));
-			break;
-
-		case HFI_PROP_SYS_ICP_FEATURE_SUPPORTED:
-			fw_features_ptr = (struct hfi_sys_camera_icp_fw_features *)
-						(property_data_ptr + 1);
-			hw_mgr->fw_feature_mask = fw_features_ptr->feature_mask;
-			CAM_DBG(CAM_ICP, "[%s] received fw_feature_mask: %d",
-					hw_mgr->hw_mgr_name, hw_mgr->fw_feature_mask);
-			break;
-
-		default:
-			CAM_DBG(CAM_ICP,
-				"[%s] HFI_MSG_SYS_ICP_FEATUREMASK_ACK property not set.	default fw_feature_mask to zero",
-				hw_mgr->hw_mgr_name);
-			hw_mgr->fw_feature_mask = 0;
-			break;
-		}
-	}
-	return 0;
-}
-
 static int cam_icp_process_msg_pkt_type(
 	struct cam_icp_hw_mgr *hw_mgr,
 	uint32_t *msg_ptr)
@@ -3092,7 +3045,6 @@ static int cam_icp_process_msg_pkt_type(
 	switch (msg_ptr[ICP_PACKET_TYPE]) {
 	case HFI_MSG_SYS_INIT_DONE:
 		CAM_DBG(CAM_ICP, "[%s] received SYS_INIT_DONE", hw_mgr->hw_mgr_name);
-		rc = cam_icp_mgr_process_feature_property_ack(hw_mgr, msg_ptr);
 		complete(&hw_mgr->icp_complete);
 		break;
 
@@ -5553,8 +5505,7 @@ static bool cam_icp_mgr_is_valid_outconfig(struct cam_packet *packet)
 		packet->io_configs_offset/4);
 
 	for (i = 0 ; i < packet->num_io_configs; i++)
-		if ((io_cfg_ptr[i].direction == CAM_BUF_OUTPUT) ||
-			(io_cfg_ptr[i].direction == CAM_BUF_IN_OUT))
+		if (io_cfg_ptr[i].direction == CAM_BUF_OUTPUT)
 			num_out_map_entries++;
 
 	if (num_out_map_entries <= CAM_MAX_OUT_RES) {
@@ -5711,20 +5662,13 @@ static int cam_icp_mgr_process_io_cfg(struct cam_icp_hw_mgr *hw_mgr,
 		if (io_cfg_ptr[i].direction == CAM_BUF_INPUT) {
 			sync_in_obj[j++] = io_cfg_ptr[i].fence;
 			prepare_args->num_in_map_entries++;
-		} else if ((io_cfg_ptr[i].direction == CAM_BUF_OUTPUT) ||
-			(io_cfg_ptr[i].direction == CAM_BUF_IN_OUT)) {
+		} else {
 			prepare_args->out_map_entries[k].sync_id =
 				io_cfg_ptr[i].fence;
 			prepare_args->out_map_entries[k].resource_handle =
 				io_cfg_ptr[i].resource_type;
 			k++;
 			prepare_args->num_out_map_entries++;
-		} else {
-			CAM_ERR(CAM_ICP, "dir: %d, max_out:%u, out %u",
-				io_cfg_ptr[i].direction,
-				prepare_args->max_out_map_entries,
-				prepare_args->num_out_map_entries);
-			return -EINVAL;
 		}
 
 		CAM_DBG(CAM_REQ,
@@ -5952,11 +5896,6 @@ static int cam_icp_packet_generic_blob_handler(void *user_data,
 
 	switch (blob_type) {
 	case CAM_ICP_CMD_GENERIC_BLOB_CLK:
-		if (index < 0) {
-			CAM_ERR(CAM_ICP, "Invalid index %d", index);
-			return -EINVAL;
-		}
-
 		CAM_WARN_RATE_LIMIT_CUSTOM(CAM_PERF, 300, 1,
 			"Using deprecated blob type GENERIC_BLOB_CLK");
 		if (blob_size != sizeof(struct cam_icp_clk_bw_request)) {
@@ -5988,11 +5927,6 @@ static int cam_icp_packet_generic_blob_handler(void *user_data,
 		break;
 
 	case CAM_ICP_CMD_GENERIC_BLOB_CLK_V2:
-		if (index < 0) {
-			CAM_ERR(CAM_ICP, "Invalid index %d", index);
-			return -EINVAL;
-		}
-
 		if (blob_size < sizeof(struct cam_icp_clk_bw_request_v2)) {
 			CAM_ERR(CAM_ICP, "%s: Mismatch blob size %d expected %lu",
 				ctx_data->ctx_id_string,
@@ -6140,11 +6074,6 @@ static int cam_icp_packet_generic_blob_handler(void *user_data,
 		break;
 
 	case CAM_ICP_CMD_GENERIC_BLOB_PRESIL_HANGDUMP:
-		if (index < 0) {
-			CAM_ERR(CAM_ICP, "Invalid index %d", index);
-			return -EINVAL;
-		}
-
 		if (cam_presil_mode_enabled()) {
 			cmd_mem_regions = (struct cam_cmd_mem_regions *)blob_data;
 			if (cmd_mem_regions->num_regions <= 0) {
@@ -7728,9 +7657,6 @@ static int cam_icp_mgr_get_hw_caps_v2(void *hw_mgr_priv, void *hw_caps_args)
 
 	query_cmd.dev_iommu_handle.non_secure = hw_mgr->iommu_hdl;
 	query_cmd.dev_iommu_handle.secure = hw_mgr->iommu_sec_hdl;
-
-	/* update params section with caps_v2 values */
-	query_cmd.params[0] = hw_mgr->fw_feature_mask;
 
 	if (copy_to_user(u64_to_user_ptr(query_cap->caps_handle),
 		&query_cmd, sizeof(struct cam_icp_query_cap_cmd_v2))) {
